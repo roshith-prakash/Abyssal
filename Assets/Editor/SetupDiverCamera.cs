@@ -13,7 +13,7 @@ namespace Abyssal.Editor
     {
         static SetupDiverCamera()
         {
-            EditorApplication.delayCall += ExecuteSetup;
+            // Do not run automatically on compile; use menu item instead
         }
 
         [MenuItem("Abyssal/Setup Third Person & Animations", false, 0)]
@@ -72,19 +72,27 @@ namespace Abyssal.Editor
             }
 
             Camera mainCam = cameraTrans.GetComponent<Camera>();
-            if (mainCam != null)
-            {
-                mainCam.nearClipPlane = 0.05f;
-            }
 
-            // Parent camera directly to Diver in THIRD-PERSON (elevated above diver)
+            // Parent camera directly to Diver without overriding its position
             Undo.SetTransformParent(cameraTrans, diverGO.transform, "Parent Camera to Diver");
-            Vector3 tpOffset = new Vector3(0.3f, 3.2f, -4.5f);
-            cameraTrans.localPosition = tpOffset;
-            cameraTrans.localRotation = Quaternion.Euler(20f, 0f, 0f);
+            cameraTrans.localRotation = Quaternion.identity;
             cameraTrans.localScale = Vector3.one;
 
-            // Setup Diver Flashlight
+            if (mainCam != null)
+            {
+                mainCam.nearClipPlane = 0.03f;
+                mainCam.fieldOfView = 75f;
+            }
+
+            // Ensure the ENTIRE diver body (head, helmet, goggles, suit, arms, oxygen tank, flippers) is fully visible
+            Renderer[] allRenderers = diverGO.GetComponentsInChildren<Renderer>(true);
+            foreach (Renderer r in allRenderers)
+            {
+                r.enabled = true;
+                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
+            }
+
+            // Setup Diver Flashlight mounted at helmet/eye level
             Transform flTrans = cameraTrans.Find("Diver Flashlight");
             Light fl = null;
             if (flTrans == null)
@@ -92,7 +100,7 @@ namespace Abyssal.Editor
                 GameObject flGO = new GameObject("Diver Flashlight");
                 flTrans = flGO.transform;
                 flTrans.SetParent(cameraTrans, false);
-                flTrans.localPosition = new Vector3(0.2f, -0.15f, 0.25f);
+                flTrans.localPosition = new Vector3(0.2f, -0.05f, 0.25f);
                 flTrans.localRotation = Quaternion.identity;
 
                 fl = flGO.AddComponent<Light>();
@@ -107,9 +115,10 @@ namespace Abyssal.Editor
             else
             {
                 fl = flTrans.GetComponent<Light>();
+                flTrans.localPosition = new Vector3(0.2f, -0.05f, 0.25f);
             }
 
-            // Setup FirstPersonCamera in Third-Person mode
+            // Setup FirstPersonCamera in First-Person mode
             FirstPersonCamera fpsCam = cameraTrans.GetComponent<FirstPersonCamera>();
             if (fpsCam == null)
             {
@@ -120,8 +129,6 @@ namespace Abyssal.Editor
             soCam.FindProperty("playerBody").objectReferenceValue = diverGO.transform;
             soCam.FindProperty("cameraTransform").objectReferenceValue = cameraTrans;
             soCam.FindProperty("diverFlashlight").objectReferenceValue = fl;
-            soCam.FindProperty("isThirdPerson").boolValue = true;
-            soCam.FindProperty("thirdPersonOffset").vector3Value = tpOffset;
             soCam.ApplyModifiedProperties();
 
             // Setup CharacterController
@@ -239,13 +246,30 @@ namespace Abyssal.Editor
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene);
 
-            Debug.Log("[Abyssal] Successfully shifted to Third-Person with Diver swimming animations configured!");
+            Debug.Log("[Abyssal] Successfully configured Diver First-Person Camera at eye level with visible arms!");
         }
 
-        [MenuItem("Abyssal/Attach Camera to Diver Eye Level", false, 1)]
+        [MenuItem("Abyssal/Attach Camera to Diver Eye Level (First-Person)", false, 0)]
         public static void ExecuteSetup()
         {
             SwitchToNewDiver();
+        }
+
+        [MenuItem("Abyssal/Parent Camera to Diver (Preserve Position)", false, 1)]
+        public static void ParentCameraKeepPosition()
+        {
+            GameObject diver = GameObject.Find("Diver");
+            GameObject cam = GameObject.Find("Main Camera");
+            if (diver != null && cam != null)
+            {
+                Undo.SetTransformParent(cam.transform, diver.transform, "Parent Camera to Diver");
+                EditorUtility.SetDirty(cam);
+                EditorUtility.SetDirty(diver);
+                var scene = EditorSceneManager.GetActiveScene();
+                EditorSceneManager.MarkSceneDirty(scene);
+                EditorSceneManager.SaveScene(scene);
+                Debug.Log("[Abyssal] Main Camera successfully parented to Diver while preserving its current position!");
+            }
         }
     }
 }

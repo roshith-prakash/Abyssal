@@ -68,6 +68,13 @@
         "com.unity.modules.uielements": "1.0.0"
       }
     },
+    "com.unity.nuget.newtonsoft-json": {
+      "version": "3.2.2",
+      "depth": 1,
+      "source": "registry",
+      "dependencies": {},
+      "url": "https://packages.unity.com"
+    },
     "com.unity.performance.profile-analyzer": {
       "version": "1.4.0",
       "depth": 1,
@@ -135,6 +142,15 @@
         "com.unity.modules.jsonserialize": "1.0.0"
       },
       "url": "https://packages.unity.com"
+    },
+    "org.christowm.unity.mcp": {
+      "version": "https://github.com/mitchchristow/unity-mcp.git?path=/Packages/org.christowm.unity.mcp",
+      "depth": 0,
+      "source": "git",
+      "dependencies": {
+        "com.unity.nuget.newtonsoft-json": "3.2.1"
+      },
+      "hash": "d7de67e9a9401884ff99516d1138c660343b4b2d"
     },
     "com.unity.modules.accessibility": {
       "version": "1.0.0",

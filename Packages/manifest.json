@@ -7,6 +7,7 @@
     "com.unity.timeline": "1.8.12",
     "com.unity.ugui": "2.5.0",
     "com.unity.visualscripting": "1.9.11",
+    "org.christowm.unity.mcp": "https://github.com/mitchchristow/unity-mcp.git?path=/Packages/org.christowm.unity.mcp",
     "com.unity.modules.accessibility": "1.0.0",
     "com.unity.modules.adaptiveperformance": "1.0.0",
     "com.unity.modules.ai": "1.0.0",

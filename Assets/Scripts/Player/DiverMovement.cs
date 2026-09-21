@@ -7,10 +7,10 @@ namespace Abyssal.Player
 {
     /// <summary>
     /// Underwater 3D movement controller for the deep-sea diver.
-    /// Handles pitch-directed swimming, vertical ascend/descend, water inertia/drag,
-    /// procedural swimming kick sway, and animator driving.
+    /// Uses direct transform translation (no CharacterController) for true 6DOF
+    /// underwater swimming. Handles water drag, buoyancy drift, fin-kick sway,
+    /// and animator driving.
     /// </summary>
-    [RequireComponent(typeof(CharacterController))]
     public class DiverMovement : MonoBehaviour
     {
         [Header("Movement Speeds")]
@@ -44,40 +44,26 @@ namespace Abyssal.Player
         [SerializeField] private Animator diverAnimator;
 
         [Header("Procedural Swimming Feedback")]
-        [Tooltip("Simulates fin kicks by subtly bobbing and rolling the camera while swimming.")]
+        [Tooltip("Simulates fin kicks by subtly rolling the camera while swimming.")]
         [SerializeField] private bool enableFinKickSway = true;
 
         [SerializeField] private float finKickFrequency = 2.5f;
-        [SerializeField] private float finKickBobAmount = 0.035f;
         [SerializeField] private float finKickRollAmount = 0.5f;
 
-        private CharacterController characterController;
         private Vector3 currentVelocity = Vector3.zero;
-        private Vector3 initialCameraLocalPos = Vector3.zero;
-        private float finKickTimer = 0f;
+        private float   finKickTimer    = 0f;
 
-        // Animator parameter hash IDs
-        private static readonly int SpeedHash = Animator.StringToHash("Speed");
+        private static readonly int SpeedHash      = Animator.StringToHash("Speed");
         private static readonly int IsSwimmingHash = Animator.StringToHash("IsSwimming");
 
+        // -----------------------------------------------------------------------
         private void Awake()
         {
-            characterController = GetComponent<CharacterController>();
-
             if (cameraTransform == null && Camera.main != null)
-            {
                 cameraTransform = Camera.main.transform;
-            }
-
-            if (cameraTransform != null)
-            {
-                initialCameraLocalPos = cameraTransform.localPosition;
-            }
 
             if (diverAnimator == null)
-            {
                 diverAnimator = GetComponentInChildren<Animator>();
-            }
         }
 
         private void Update()
@@ -87,60 +73,47 @@ namespace Abyssal.Player
             UpdateAnimator();
         }
 
+        // -----------------------------------------------------------------------
         private void HandleMovement()
         {
             Vector3 inputDir = ReadMovementInput(out bool isSprinting);
-
-            // Calculate target speed
             float targetSpeed = isSprinting ? sprintSpeed : swimSpeed;
 
-            // Direction calculation:
-            // Forward/Back follows camera pitch & yaw (3D underwater swim)
-            // Left/Right strafes horizontally relative to camera yaw
-            Vector3 desiredDirection = Vector3.zero;
+            // Lazily resolve camera in case it wasn't ready at Awake
+            if (cameraTransform == null && Camera.main != null)
+                cameraTransform = Camera.main.transform;
 
+            // Build desired direction from camera orientation (true 3D underwater)
+            Vector3 desiredDir = Vector3.zero;
             if (cameraTransform != null)
             {
-                Vector3 camForward = cameraTransform.forward;
-                Vector3 camRight = cameraTransform.right;
-
-                // 3D forward swimming (looking down swims down, looking up swims up)
-                desiredDirection += camForward * inputDir.z;
-                // Lateral strafing
-                desiredDirection += camRight * inputDir.x;
-                // Dedicated vertical ascend/descend (world space Y)
-                desiredDirection += Vector3.up * inputDir.y;
+                desiredDir += cameraTransform.forward * inputDir.z;
+                desiredDir += cameraTransform.right   * inputDir.x;
             }
             else
             {
-                desiredDirection = transform.forward * inputDir.z + transform.right * inputDir.x + Vector3.up * inputDir.y;
+                desiredDir = transform.forward * inputDir.z + transform.right * inputDir.x;
             }
 
-            if (desiredDirection.sqrMagnitude > 1f)
-            {
-                desiredDirection.Normalize();
-            }
+            if (desiredDir.sqrMagnitude > 1f) desiredDir.Normalize();
 
-            Vector3 targetVelocity = desiredDirection * targetSpeed;
+            Vector3 targetVelocity = desiredDir * targetSpeed + Vector3.up * (inputDir.y * verticalSpeed);
 
-            // Apply water drag / smooth acceleration
-            float rate = (targetVelocity.sqrMagnitude > 0.01f) ? acceleration : drag;
+            // Smooth acceleration / water drag
+            float rate = targetVelocity.sqrMagnitude > 0.01f ? acceleration : drag;
             currentVelocity = Vector3.Lerp(currentVelocity, targetVelocity, rate * Time.deltaTime);
 
-            // Apply subtle neutral buoyancy float when nearly still
+            // Neutral buoyancy drift when still
             if (enableBuoyancyDrift && currentVelocity.sqrMagnitude < 0.1f)
             {
-                float driftY = Mathf.Sin(Time.time * buoyancyFrequency) * buoyancyDriftSpeed;
-                currentVelocity.y += driftY * Time.deltaTime;
+                currentVelocity.y += Mathf.Sin(Time.time * buoyancyFrequency) * buoyancyDriftSpeed * Time.deltaTime;
             }
 
-            // Move the character controller
-            if (characterController != null && characterController.enabled)
-            {
-                characterController.Move(currentVelocity * Time.deltaTime);
-            }
+            // Directly translate the diver — no CharacterController, no collision blocking
+            transform.position += currentVelocity * Time.deltaTime;
         }
 
+        // -----------------------------------------------------------------------
         private Vector3 ReadMovementInput(out bool isSprinting)
         {
             Vector3 input = Vector3.zero;
@@ -149,88 +122,75 @@ namespace Abyssal.Player
 #if ENABLE_INPUT_SYSTEM
             if (Keyboard.current != null)
             {
-                if (Keyboard.current.wKey.isPressed) input.z += 1f;
-                if (Keyboard.current.sKey.isPressed) input.z -= 1f;
-                if (Keyboard.current.dKey.isPressed) input.x += 1f;
-                if (Keyboard.current.aKey.isPressed) input.x -= 1f;
-                if (Keyboard.current.spaceKey.isPressed) input.y += 1f;
-                if (Keyboard.current.leftCtrlKey.isPressed || Keyboard.current.cKey.isPressed) input.y -= 1f;
-                isSprinting = Keyboard.current.leftShiftKey.isPressed;
+                if (Keyboard.current.wKey.isPressed || Keyboard.current.upArrowKey.isPressed)    input.z += 1f;
+                if (Keyboard.current.sKey.isPressed || Keyboard.current.downArrowKey.isPressed)  input.z -= 1f;
+                if (Keyboard.current.dKey.isPressed || Keyboard.current.rightArrowKey.isPressed) input.x += 1f;
+                if (Keyboard.current.aKey.isPressed || Keyboard.current.leftArrowKey.isPressed)  input.x -= 1f;
+                if (Keyboard.current.spaceKey.isPressed || Keyboard.current.eKey.isPressed)      input.y += 1f;
+                if (Keyboard.current.leftCtrlKey.isPressed || Keyboard.current.cKey.isPressed || Keyboard.current.qKey.isPressed) input.y -= 1f;
+                if (Keyboard.current.leftShiftKey.isPressed) isSprinting = true;
             }
 
             if (Gamepad.current != null)
             {
-                Vector2 leftStick = Gamepad.current.leftStick.ReadValue();
-                input.x += leftStick.x;
-                input.z += leftStick.y;
-
-                if (Gamepad.current.rightTrigger.isPressed) input.y += 1f;
-                if (Gamepad.current.leftTrigger.isPressed) input.y -= 1f;
+                Vector2 stick = Gamepad.current.leftStick.ReadValue();
+                input.x += stick.x;
+                input.z += stick.y;
+                if (Gamepad.current.rightTrigger.isPressed)  input.y += 1f;
+                if (Gamepad.current.leftTrigger.isPressed)   input.y -= 1f;
                 if (Gamepad.current.leftStickButton.isPressed) isSprinting = true;
             }
-#else
-            input.x = Input.GetAxisRaw("Horizontal");
-            input.z = Input.GetAxisRaw("Vertical");
-
-            if (Input.GetKey(KeyCode.Space)) input.y += 1f;
-            if (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.C)) input.y -= 1f;
-            isSprinting = Input.GetKey(KeyCode.LeftShift);
 #endif
+            // Legacy fallback (covers "Old" and "Both" active input handling)
+            try
+            {
+                if (input.sqrMagnitude < 0.001f)
+                {
+                    input.x = Input.GetAxisRaw("Horizontal");
+                    input.z = Input.GetAxisRaw("Vertical");
+                    if (Input.GetKey(KeyCode.Space) || Input.GetKey(KeyCode.E)) input.y += 1f;
+                    if (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.C) || Input.GetKey(KeyCode.Q)) input.y -= 1f;
+                    if (Input.GetKey(KeyCode.LeftShift)) isSprinting = true;
+                }
+            }
+            catch (System.Exception) { }
 
             return input;
         }
 
+        // -----------------------------------------------------------------------
         private void HandleSwimmingSway()
         {
             if (!enableFinKickSway || cameraTransform == null) return;
 
-            float horizontalSpeed = new Vector2(currentVelocity.x, currentVelocity.z).magnitude;
             bool isMoving = currentVelocity.magnitude > 0.3f;
-
             if (isMoving)
             {
-                finKickTimer += Time.deltaTime * finKickFrequency * (horizontalSpeed / swimSpeed);
-                float bobOffset = Mathf.Sin(finKickTimer) * finKickBobAmount;
-                float rollOffset = Mathf.Cos(finKickTimer * 0.5f) * finKickRollAmount;
-
-                cameraTransform.localPosition = initialCameraLocalPos + new Vector3(0f, bobOffset, 0f);
+                float speed = new Vector2(currentVelocity.x, currentVelocity.z).magnitude;
+                finKickTimer += Time.deltaTime * finKickFrequency * (speed / swimSpeed);
+                float roll = Mathf.Cos(finKickTimer * 0.5f) * finKickRollAmount;
                 cameraTransform.localRotation = Quaternion.Euler(
                     cameraTransform.localEulerAngles.x,
                     cameraTransform.localEulerAngles.y,
-                    rollOffset
-                );
+                    roll);
             }
             else
             {
-                // Smoothly return to center when stopped
                 finKickTimer = 0f;
-                cameraTransform.localPosition = Vector3.Lerp(
-                    cameraTransform.localPosition,
-                    initialCameraLocalPos,
-                    5f * Time.deltaTime
-                );
             }
         }
 
+        // -----------------------------------------------------------------------
         private void UpdateAnimator()
         {
             if (diverAnimator == null || !diverAnimator.enabled) return;
-
             float speed = currentVelocity.magnitude;
-            bool isSwimming = speed > 0.2f;
-
             diverAnimator.SetFloat(SpeedHash, speed);
-            diverAnimator.SetBool(IsSwimmingHash, isSwimming);
+            diverAnimator.SetBool(IsSwimmingHash, speed > 0.2f);
         }
 
-        /// <summary>
-        /// Public read of current diver swimming speed.
-        /// </summary>
         public float CurrentSpeed => currentVelocity.magnitude;
-
-        /// <summary>
-        /// Public read of whether diver is actively swimming.
-        /// </summary>
-        public bool IsSwimming => currentVelocity.magnitude > 0.2f;
+        public bool  IsSwimming   => currentVelocity.magnitude > 0.2f;
     }
 }
+

@@ -6,265 +6,176 @@ using UnityEngine.InputSystem;
 namespace Abyssal.Player
 {
     /// <summary>
-    /// First-person camera controller placed at diver eye-level.
-    /// Handles pitch/yaw mouse look, cursor locking, and diver flashlight control.
-    /// Supports both the New Input System and legacy input fallback.
+    /// Minimal first-person camera controller.
+    /// ONLY handles mouse look (pitch + yaw) and cursor locking.
+    /// Position is NEVER touched in code — the camera moves with the
+    /// diver automatically because it is a child of the Diver GameObject.
     /// </summary>
     public class FirstPersonCamera : MonoBehaviour
     {
-        [Header("Target References")]
-        [Tooltip("The root player transform rotated for horizontal yaw. If null, rotates this transform.")]
+        [Header("References")]
+        [Tooltip("The Diver root transform rotated horizontally (yaw). Auto-resolved from parent if null.")]
         [SerializeField] private Transform playerBody;
 
-        [Tooltip("The camera transform rotated for vertical pitch. Defaults to this transform.")]
-        [SerializeField] private Transform cameraTransform;
-
-        [Tooltip("Optional diver flashlight (Spotlight) mounted to the helmet/camera.")]
+        [Tooltip("Optional flashlight toggled with F.")]
         [SerializeField] private Light diverFlashlight;
 
-        [Header("Look Sensitivity")]
+        [Header("Mouse Look")]
         [Range(0.1f, 10f)]
         [SerializeField] private float mouseSensitivity = 2.0f;
 
-        [Tooltip("Smooth look motion for fluid underwater feel.")]
+        [Tooltip("Smooth look input for a fluid underwater feel.")]
         [SerializeField] private bool smoothLook = true;
 
         [Range(1f, 30f)]
         [SerializeField] private float smoothSpeed = 15f;
 
-        [Header("Pitch Limits")]
+        [Header("Pitch Clamp")]
         [Range(-90f, 0f)]
         [SerializeField] private float minPitch = -80f;
 
         [Range(0f, 90f)]
         [SerializeField] private float maxPitch = 80f;
 
-        [Header("Perspective Mode")]
-        [Tooltip("When true, places the camera above and behind the diver in third-person to view swimming animations.")]
-        [SerializeField] private bool isThirdPerson = true;
-
-        [Tooltip("Camera offset relative to the diver in third-person (elevated above the diver).")]
-        [SerializeField] private Vector3 thirdPersonOffset = new Vector3(0.3f, 3.2f, -4.5f);
-
-        [Tooltip("Downward pitch angle looking down at the diver from above in third-person.")]
-        [SerializeField] private float thirdPersonPitchAngle = 20f;
-
-        [Header("Eye Level Positioning (First-Person)")]
-        [Tooltip("Default eye-level height in meters above diver ground position.")]
-        [SerializeField] private float eyeHeight = 1.65f;
-
-        [Header("Flashlight Settings")]
+        [Header("Flashlight")]
         [SerializeField] private bool startFlashlightOn = true;
 
         private float currentPitch = 0f;
-        private float currentYaw = 0f;
-        private Vector2 currentLookDelta = Vector2.zero;
-        private Vector2 smoothLookVelocity = Vector2.zero;
+        private float currentYaw   = 0f;
+        private Vector2 smoothedDelta  = Vector2.zero;
+        private Vector2 smoothVelocity = Vector2.zero;
 
         private void Awake()
         {
-            if (cameraTransform == null)
-            {
-                cameraTransform = transform;
-            }
-
-            if (playerBody == null && transform.parent != null)
+            if (playerBody == null)
             {
                 playerBody = transform.parent;
+                if (playerBody == null)
+                {
+                    GameObject diver = GameObject.Find("Diver");
+                    if (diver != null) playerBody = diver.transform;
+                }
             }
         }
 
         private void Start()
         {
-            // Initialize camera orientation
-            currentPitch = cameraTransform.localEulerAngles.x;
+            // Seed yaw from the player body's current world rotation
+            currentYaw = playerBody != null ? playerBody.eulerAngles.y : transform.eulerAngles.y;
+
+            // Seed pitch from camera's current local rotation, unwrapping from 0-360 to -180..180
+            currentPitch = transform.localEulerAngles.x;
             if (currentPitch > 180f) currentPitch -= 360f;
 
-            if (playerBody != null)
-            {
-                currentYaw = playerBody.eulerAngles.y;
-            }
-            else
-            {
-                currentYaw = transform.eulerAngles.y;
-            }
-
-            // Apply initial position based on perspective mode
-            ApplyPerspectivePosition();
-
-            // Lock and hide cursor for gameplay
-            LockCursor(true);
-
-            // Initialize flashlight state
             if (diverFlashlight != null)
-            {
                 diverFlashlight.enabled = startFlashlightOn;
-            }
+
+            LockCursor(true);
         }
 
         private void Update()
         {
-            HandleCursorToggle();
-            HandleLookInput();
-            HandleFlashlightToggle();
+            HandleCursorLock();
+            HandleMouseLook();
+            HandleFlashlight();
         }
 
-        private void HandleLookInput()
+        private void HandleMouseLook()
         {
-            // Only look when cursor is locked
-            if (Cursor.lockState != CursorLockMode.Locked)
-            {
-                return;
-            }
+            if (Cursor.lockState != CursorLockMode.Locked) return;
 
-            Vector2 rawLook = ReadLookDelta();
+            Vector2 raw = ReadMouseDelta();
 
             if (smoothLook)
-            {
-                currentLookDelta = Vector2.SmoothDamp(
-                    currentLookDelta,
-                    rawLook,
-                    ref smoothLookVelocity,
-                    1f / smoothSpeed
-                );
-            }
+                smoothedDelta = Vector2.SmoothDamp(smoothedDelta, raw, ref smoothVelocity, 1f / smoothSpeed);
             else
-            {
-                currentLookDelta = rawLook;
-            }
+                smoothedDelta = raw;
 
-            float mouseX = currentLookDelta.x * mouseSensitivity;
-            float mouseY = currentLookDelta.y * mouseSensitivity;
+            float dYaw   = smoothedDelta.x * mouseSensitivity;
+            float dPitch = smoothedDelta.y * mouseSensitivity;
 
-            // Pitch (Vertical - Up/Down)
-            currentPitch -= mouseY;
-            currentPitch = Mathf.Clamp(currentPitch, minPitch, maxPitch);
+            // Pitch — camera rotates on its local X axis
+            currentPitch -= dPitch;
+            currentPitch  = Mathf.Clamp(currentPitch, minPitch, maxPitch);
+            transform.localRotation = Quaternion.Euler(currentPitch, 0f, 0f);
 
-            // Apply camera pitch looking down at the diver from above
-            float pitchOffset = isThirdPerson ? thirdPersonPitchAngle : 0f;
-            cameraTransform.localRotation = Quaternion.Euler(currentPitch + pitchOffset, 0f, 0f);
-            ApplyPerspectivePosition();
-
-            // Yaw (Horizontal - Left/Right)
-            currentYaw += mouseX;
+            // Yaw — player body rotates on world Y axis
+            currentYaw += dYaw;
             if (playerBody != null)
-            {
                 playerBody.rotation = Quaternion.Euler(0f, currentYaw, 0f);
-            }
             else
-            {
                 transform.rotation = Quaternion.Euler(currentPitch, currentYaw, 0f);
-            }
         }
 
-        private void ApplyPerspectivePosition()
-        {
-            if (cameraTransform == null) return;
-
-            if (isThirdPerson)
-            {
-                cameraTransform.localPosition = thirdPersonOffset;
-            }
-            else
-            {
-                cameraTransform.localPosition = new Vector3(0f, eyeHeight, 0f);
-            }
-        }
-
-        private Vector2 ReadLookDelta()
+        private Vector2 ReadMouseDelta()
         {
             Vector2 delta = Vector2.zero;
 
 #if ENABLE_INPUT_SYSTEM
             if (Mouse.current != null)
-            {
                 delta = Mouse.current.delta.ReadValue() * 0.1f;
-            }
 
             if (Gamepad.current != null)
             {
                 Vector2 stick = Gamepad.current.rightStick.ReadValue();
                 if (stick.sqrMagnitude > 0.01f)
-                {
                     delta += stick * 10f * Time.deltaTime;
-                }
             }
-#else
-            delta = new Vector2(
-                Input.GetAxisRaw("Mouse X"),
-                Input.GetAxisRaw("Mouse Y")
-            );
 #endif
+            // Legacy fallback — covers "Old" and "Both" active input handling modes
+            if (delta.sqrMagnitude < 0.0001f)
+            {
+                try
+                {
+                    delta = new Vector2(Input.GetAxisRaw("Mouse X"), Input.GetAxisRaw("Mouse Y"));
+                }
+                catch (System.Exception) { }
+            }
 
             return delta;
         }
 
-        private void HandleCursorToggle()
+        private void HandleCursorLock()
         {
-            // Unlock on Escape
+            bool esc   = false;
+            bool click = false;
+
 #if ENABLE_INPUT_SYSTEM
-            if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame)
-            {
-                LockCursor(false);
-            }
-            // Re-lock on Left Click inside game view
-            if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame && Cursor.lockState != CursorLockMode.Locked)
-            {
-                LockCursor(true);
-            }
-#else
-            if (Input.GetKeyDown(KeyCode.Escape))
-            {
-                LockCursor(false);
-            }
-            if (Input.GetMouseButtonDown(0) && Cursor.lockState != CursorLockMode.Locked)
-            {
-                LockCursor(true);
-            }
+            if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame) esc   = true;
+            if (Mouse.current    != null && Mouse.current.leftButton.wasPressedThisFrame)   click = true;
 #endif
+            try
+            {
+                if (Input.GetKeyDown(KeyCode.Escape)) esc   = true;
+                if (Input.GetMouseButtonDown(0))      click = true;
+            }
+            catch (System.Exception) { }
+
+            if (esc)
+                LockCursor(false);
+            else if (click && Cursor.lockState != CursorLockMode.Locked)
+                LockCursor(true);
         }
 
-        private void HandleFlashlightToggle()
+        private void HandleFlashlight()
         {
-            bool togglePressed = false;
+            bool pressed = false;
 
 #if ENABLE_INPUT_SYSTEM
-            if (Keyboard.current != null && Keyboard.current.fKey.wasPressedThisFrame)
-            {
-                togglePressed = true;
-            }
-#else
-            if (Input.GetKeyDown(KeyCode.F))
-            {
-                togglePressed = true;
-            }
+            if (Keyboard.current != null && Keyboard.current.fKey.wasPressedThisFrame) pressed = true;
 #endif
+            try { if (!pressed && Input.GetKeyDown(KeyCode.F)) pressed = true; }
+            catch (System.Exception) { }
 
-            if (togglePressed && diverFlashlight != null)
-            {
+            if (pressed && diverFlashlight != null)
                 diverFlashlight.enabled = !diverFlashlight.enabled;
-            }
         }
 
-        /// <summary>
-        /// Set cursor lock and visibility state.
-        /// </summary>
         public void LockCursor(bool locked)
         {
             Cursor.lockState = locked ? CursorLockMode.Locked : CursorLockMode.None;
-            Cursor.visible = !locked;
-        }
-
-        /// <summary>
-        /// Adjust camera local position to eye height.
-        /// </summary>
-        [ContextMenu("Align to Eye Height")]
-        public void SetEyeHeight(float height)
-        {
-            eyeHeight = height;
-            Vector3 pos = cameraTransform.localPosition;
-            pos.y = eyeHeight;
-            cameraTransform.localPosition = pos;
+            Cursor.visible   = !locked;
         }
     }
 }
+
