@@ -15,7 +15,7 @@ namespace Abyssal.Gameplay
     {
         [Header("Trigger Settings")]
         [Tooltip("Configurable activation radius around the crystal.")]
-        [SerializeField] private float triggerRadius = 12.0f;
+        [SerializeField] private float triggerRadius = 30.0f;
 
         [Tooltip("True once the cutscene has been activated; guarantees one-time execution.")]
         [SerializeField] private bool hasTriggered = false;
@@ -31,15 +31,28 @@ namespace Abyssal.Gameplay
 
         private void Awake()
         {
+            if (triggerRadius < 30.0f) triggerRadius = 30.0f;
+
             sphereCollider = GetComponent<SphereCollider>();
             if (sphereCollider == null) sphereCollider = gameObject.AddComponent<SphereCollider>();
 
             sphereCollider.isTrigger = true;
-            sphereCollider.radius = triggerRadius;
+            UpdateColliderRadius();
+        }
+
+        private void UpdateColliderRadius()
+        {
+            if (sphereCollider == null) return;
+            // Lossy scale compensation: A SphereCollider's world radius is radius * lossyScale.
+            // On a GameObject with scale (6.5, 6.5, 6.5), setting radius to 30 creates a 195m radius!
+            // We divide triggerRadius by the transform's max scale so world radius is exactly triggerRadius (30m).
+            float maxScale = Mathf.Max(transform.lossyScale.x, Mathf.Max(transform.lossyScale.y, transform.lossyScale.z));
+            sphereCollider.radius = maxScale > 0.0001f ? (triggerRadius / maxScale) : triggerRadius;
         }
 
         private void Start()
         {
+            UpdateColliderRadius();
             ResolvePlayer();
         }
 
@@ -58,7 +71,7 @@ namespace Abyssal.Gameplay
             float distance = Vector3.Distance(transform.position, playerTransform.position);
             if (distance <= triggerRadius)
             {
-                TriggerCutscene("Proximity check");
+                TriggerCutscene($"Proximity check (distance: {distance:F1}m)");
             }
         }
 
@@ -71,10 +84,17 @@ namespace Abyssal.Gameplay
                             other.GetComponentInParent<DiverMovement>() != null ||
                             other.GetComponentInParent<DiverHealth>() != null;
 
-            if (isPlayer)
+            if (!isPlayer) return;
+
+            // Strict distance check: Ensure diver is truly within triggerRadius (30m) in world space
+            float distance = Vector3.Distance(transform.position, other.transform.position);
+            if (distance > triggerRadius * 1.15f)
             {
-                TriggerCutscene($"Trigger collision with {other.gameObject.name}");
+                // Ignore premature triggers if collider bounds overlap outside the 30m world radius
+                return;
             }
+
+            TriggerCutscene($"Trigger collision with {other.gameObject.name} (distance: {distance:F1}m)");
         }
 
         private void TriggerCutscene(string reason)
@@ -92,14 +112,13 @@ namespace Abyssal.Gameplay
             {
                 // Fallback search
                 var controller = FindAnyObjectByType<FinalCutsceneController>();
-                if (controller != null)
+                if (controller == null)
                 {
-                    controller.StartCutscene();
+                    GameObject manager = new GameObject("FinalCutsceneManager");
+                    controller = manager.AddComponent<FinalCutsceneController>();
+                    Debug.Log("[FinalCutsceneTrigger] Created FinalCutsceneManager on demand.");
                 }
-                else
-                {
-                    Debug.LogError("[FinalCutsceneTrigger] FinalCutsceneController not found in scene!");
-                }
+                controller.StartCutscene();
             }
         }
 
@@ -113,12 +132,9 @@ namespace Abyssal.Gameplay
 
         private void OnValidate()
         {
+            if (triggerRadius < 30.0f) triggerRadius = 30.0f;
             if (sphereCollider == null) sphereCollider = GetComponent<SphereCollider>();
-            if (sphereCollider != null)
-            {
-                sphereCollider.isTrigger = true;
-                sphereCollider.radius = triggerRadius;
-            }
+            UpdateColliderRadius();
         }
 
         private void OnDrawGizmosSelected()

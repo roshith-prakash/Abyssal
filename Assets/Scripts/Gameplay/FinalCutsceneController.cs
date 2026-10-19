@@ -3,6 +3,9 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 using Abyssal.Player;
 using Abyssal.Scanner;
 using Abyssal.UI;
@@ -12,8 +15,8 @@ namespace Abyssal.Gameplay
     /// <summary>
     /// Master coordinator for the ABYSSAL Final Horror Cutscene.
     /// Manages the state machine, total player control lock, procedural camera choreography,
-    /// audio cues, egg nest reaction, Ghost Leviathan reveal and high-speed attack charge,
-    /// deterministic lethal impact and player death, and cinematic fade to ending screen.
+    /// audio cues, egg nest reaction, Ghost Leviathan dynamic reveal and high-speed attack charge,
+    /// deterministic lethal impact and player death, camera rendering preservation, and cinematic ending screen.
     /// </summary>
     public class FinalCutsceneController : MonoBehaviour
     {
@@ -51,8 +54,9 @@ namespace Abyssal.Gameplay
         [Header("Ghost Leviathan References")]
         [SerializeField] private GameObject ghostLeviathanObject;
         [SerializeField] private Animator ghostLeviathanAnimator;
-        [SerializeField] private Vector3 spawnPosition = new Vector3(0f, -18f, 195f);
-        [SerializeField] private Vector3 revealPosition = new Vector3(0f, -19f, 175f);
+        [SerializeField] private Transform ghostHeadTransform;
+        [Tooltip("Distance directly in front of the diver's camera where the Leviathan emerges from the dark fog.")]
+        [SerializeField] private float spawnDistance = 28.0f;
 
         [Header("Audio Sources & Clips")]
         [SerializeField] private AudioSource cutsceneAudioSource;
@@ -64,30 +68,24 @@ namespace Abyssal.Gameplay
         [SerializeField] private AudioClip rushClip;
 
         [Header("Phase Timing Configuration (Seconds)")]
-        [Tooltip("Phase A: Diver approaches crystal, controls lock, scanner malfunctions (0-3s).")]
-        [SerializeField] private float phaseADuration = 3.0f;
+        [Tooltip("Menacing reveal and roar right in front of the diver (emerging from fog).")]
+        [SerializeField] private float revealDuration = 1.2f;
 
-        [Tooltip("Phase B: Eggs react, subtle vibration, cavern rumble (3-6s).")]
-        [SerializeField] private float phaseBDuration = 3.0f;
+        [Tooltip("Rapid predatory charge covering the distance directly into the camera lens.")]
+        [SerializeField] private float chargeDuration = 2.0f;
 
-        [Tooltip("Phase C: Camera turns to darkness ahead, silhouette stirs in fog (6-10s).")]
-        [SerializeField] private float phaseCDuration = 4.0f;
-
-        [Tooltip("Phase D: Ghost Leviathan reveal through fog, roar, dread pause (10-15s).")]
-        [SerializeField] private float phaseDDuration = 5.0f;
-
-        [Tooltip("Phase E: Sudden acceleration charge directly toward diver (15-18s).")]
-        [SerializeField] private float phaseEDuration = 3.2f;
-
-        [Tooltip("Phase F: Violent camera jolt and lethal impact (18-21s).")]
+        [Tooltip("Violent camera jolt and lethal impact duration.")]
         [SerializeField] private float impactShakeDuration = 1.2f;
-        [SerializeField] private float impactShakeIntensity = 0.5f;
+        [SerializeField] private float impactShakeIntensity = 0.85f;
 
-        [Tooltip("Phase G: Screen fade to black duration.")]
-        [SerializeField] private float fadeDuration = 2.0f;
+        [Tooltip("Screen fade to black duration.")]
+        [SerializeField] private float fadeDuration = 1.2f;
 
-        [Tooltip("Phase G: Delay in pure darkness before showing SIGNAL LOST.")]
-        [SerializeField] private float endingTextDelay = 1.0f;
+        [Tooltip("Delay in pure darkness before showing SIGNAL LOST.")]
+        [SerializeField] private float endingTextDelay = 0.8f;
+
+        // Camera Safety Fallback
+        private Camera fallbackCamera;
 
         // UI & Fade State
         private float screenFadeAlpha = 0f;
@@ -99,11 +97,25 @@ namespace Abyssal.Gameplay
 
         // Internal tracking
         private Vector3[] eggBasePositions;
-        private Quaternion cameraOriginalRot;
         private float originalAmbientVolume = 0.55f;
 
         public CutsceneState CurrentState => currentState;
         public bool IsCutsceneActive => isCutsceneActive;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
+        private static void AutoInitializeCutsceneSystem()
+        {
+            if (Instance == null)
+            {
+                var existing = FindAnyObjectByType<FinalCutsceneController>();
+                if (existing == null)
+                {
+                    GameObject managerGO = new GameObject("FinalCutsceneManager");
+                    managerGO.AddComponent<FinalCutsceneController>();
+                    Debug.Log("[FinalCutsceneController] Automatically initialized FinalCutsceneManager on scene load.");
+                }
+            }
+        }
 
         private void Awake()
         {
@@ -117,6 +129,7 @@ namespace Abyssal.Gameplay
                 return;
             }
 
+            EnsureFallbackCamera();
             CreateTextures();
             SetupAudioSources();
         }
@@ -128,17 +141,111 @@ namespace Abyssal.Gameplay
             PrepareProceduralAudio();
         }
 
+        [Header("Debug")]
+        [SerializeField] private bool debugTriggerInPlayMode = false;
+
         private void Update()
         {
+            EnsureCameraSafety();
+
+            if (debugTriggerInPlayMode && !isCutsceneActive)
+            {
+                debugTriggerInPlayMode = false;
+                StartCutscene();
+            }
+
+#if UNITY_EDITOR
+            bool tPressed = false;
+#if ENABLE_INPUT_SYSTEM
+            if (Keyboard.current != null && Keyboard.current.tKey.wasPressedThisFrame) tPressed = true;
+#endif
+            try { if (!tPressed && Input.GetKeyDown(KeyCode.T)) tPressed = true; } catch { }
+            if (!isCutsceneActive && tPressed)
+            {
+                Debug.Log("[FinalCutsceneController] Debug T key pressed: Starting cutscene!");
+                StartCutscene();
+            }
+#endif
+
             if (showEndingScreen)
             {
-                // Allow restarting only when final ending screen is displayed
-                if (Input.GetKeyDown(KeyCode.R))
+                if (CheckRestartInput())
                 {
                     Scene activeScene = SceneManager.GetActiveScene();
                     SceneManager.LoadScene(activeScene.buildIndex);
                 }
             }
+        }
+
+        /// <summary>
+        /// Guarantees that at least one active Camera is rendering to Display 1 at all times,
+        /// completely preventing the Unity 'Display 1 No cameras rendering' message.
+        /// </summary>
+        private void EnsureCameraSafety()
+        {
+            bool hasValidRenderingCamera = (diverCamera != null && diverCamera.gameObject.activeInHierarchy) ||
+                                           (Camera.main != null && Camera.main.gameObject.activeInHierarchy);
+
+            if (!hasValidRenderingCamera)
+            {
+                if (fallbackCamera == null)
+                {
+                    EnsureFallbackCamera();
+                }
+
+                if (fallbackCamera != null && !fallbackCamera.enabled)
+                {
+                    Debug.LogWarning("[FinalCutsceneController] Active camera lost; activating fallback camera.");
+                    fallbackCamera.enabled = true;
+                }
+            }
+            else
+            {
+                // Deactivate fallback camera if primary camera is actively rendering
+                if (fallbackCamera != null && fallbackCamera.enabled)
+                {
+                    fallbackCamera.enabled = false;
+                }
+            }
+        }
+
+        private void EnsureFallbackCamera()
+        {
+            fallbackCamera = GetComponent<Camera>();
+            if (fallbackCamera == null)
+            {
+                fallbackCamera = gameObject.AddComponent<Camera>();
+            }
+
+            fallbackCamera.clearFlags = CameraClearFlags.SolidColor;
+            fallbackCamera.backgroundColor = Color.black;
+            fallbackCamera.cullingMask = 0; // Pure solid background rendering for ending screen
+            fallbackCamera.depth = -100;
+            fallbackCamera.enabled = false;
+        }
+
+        private bool CheckRestartInput()
+        {
+#if ENABLE_INPUT_SYSTEM
+            if (Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame)
+            {
+                return true;
+            }
+#endif
+#if ENABLE_LEGACY_INPUT_MANAGER
+            try
+            {
+                if (Input.GetKeyDown(KeyCode.R))
+                {
+                    return true;
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                // Suppress exception when active Input Handling is set to new Input System
+            }
+#endif
+            return false;
         }
 
         public void StartCutscene()
@@ -147,18 +254,23 @@ namespace Abyssal.Gameplay
             isCutsceneActive = true;
 
             ResolveSceneReferences();
+
+            // Lock controls, but keep camera firmly attached to Diver for immersive First-Person horror!
+            if (diverCamera != null)
+            {
+                diverCamera.SetControlsEnabled(false);
+            }
+            if (diverMovement != null)
+            {
+                diverMovement.SetControlsEnabled(false);
+            }
+
             StartCoroutine(ExecuteCutsceneSequence());
         }
 
         private IEnumerator ExecuteCutsceneSequence()
         {
             Debug.Log("[FinalCutsceneController] === STARTING FINAL HORROR CINEMATIC SEQUENCE ===");
-
-            // -------------------------------------------------------------------
-            // PHASE A: The Diver Approaches the Crystal (0 - 3s)
-            // Lock controls immediately, freeze scanner, fade underwater ambience
-            // -------------------------------------------------------------------
-            currentState = CutsceneState.PhaseA_ApproachCrystal;
 
             // 1. Strict Player Control Lock
             if (diverMovement != null) diverMovement.SetControlsEnabled(false);
@@ -168,281 +280,315 @@ namespace Abyssal.Gameplay
             var hud = FindAnyObjectByType<GameHUDManager>();
             if (hud != null) hud.enabled = false;
 
-            // 2. Scanner Malfunction
-            if (scannerHUD != null) scannerHUD.TriggerMalfunction();
-            PlaySound(glitchClip, 0.75f);
+            // 2. Ensure Ghost Leviathan instance exists, is active and configured
+            EnsureLeviathanInstance();
 
-            // 3. Ambient Audio Fade Down
-            if (ambientAudioSource != null)
+            Vector3 diverPos = diverTransform != null ? diverTransform.position : new Vector3(0f, -22f, 125f);
+            Vector3 camPos = diverCamera != null ? diverCamera.transform.position : diverPos + Vector3.up * 1.6f;
+
+            // 3. Dynamic Spawn Calculation: Directly in front of the user's camera at a distance
+            Vector3 lookDir = Vector3.forward;
+            if (diverCamera != null)
             {
-                originalAmbientVolume = ambientAudioSource.volume;
-                StartCoroutine(FadeAudioVolume(ambientAudioSource, 0.15f, 2.0f));
+                lookDir = diverCamera.transform.forward;
+            }
+            else if (diverTransform != null)
+            {
+                lookDir = diverTransform.forward;
             }
 
-            // 4. Smooth Camera Framing towards Crystal
-            Vector3 crystalLookTarget = crystalTransform != null
-                ? crystalTransform.position + Vector3.up * 1.5f
-                : (diverTransform != null ? diverTransform.position + Vector3.forward * 8f : Vector3.zero);
-
-            float elapsed = 0f;
-            while (elapsed < phaseADuration)
+            Vector3 horizontal = new Vector3(lookDir.x, 0f, lookDir.z);
+            if (horizontal.sqrMagnitude < 0.01f)
             {
-                elapsed += Time.deltaTime;
-                if (diverCamera != null)
-                {
-                    diverCamera.SmoothLookToward(crystalLookTarget, 2.2f);
-                }
-                yield return null;
+                horizontal = Vector3.forward;
+            }
+            else
+            {
+                horizontal.Normalize();
             }
 
-            // -------------------------------------------------------------------
-            // PHASE B: The Eggs React (3 - 6s)
-            // Camera tilts down to eggs, subtle vibration, crystal light pulse, rumble
-            // -------------------------------------------------------------------
-            currentState = CutsceneState.PhaseB_EggsReact;
+            // Blend user forward with subtle vertical pitch to match their direct line of sight
+            Vector3 spawnDir = (horizontal * 0.88f + Vector3.up * Mathf.Clamp(lookDir.y, -0.22f, 0.22f)).normalized;
+            Vector3 spawnPos = camPos + spawnDir * spawnDistance + Vector3.up * 1.2f;
 
-            PlaySound(rumbleClip, 0.7f);
-
-            Vector3 eggLookTarget = eggNestTransform != null
-                ? eggNestTransform.position
-                : (crystalTransform != null ? crystalTransform.position + Vector3.down * 1.5f : Vector3.zero);
-
-            Color originalCrystalColor = crystalLight != null ? crystalLight.color : Color.cyan;
-            float originalCrystalIntensity = crystalLight != null ? crystalLight.intensity : 6f;
-
-            elapsed = 0f;
-            while (elapsed < phaseBDuration)
-            {
-                elapsed += Time.deltaTime;
-                float t = elapsed / phaseBDuration;
-
-                // Frame eggs
-                if (diverCamera != null)
-                {
-                    diverCamera.SmoothLookToward(eggLookTarget, 1.8f);
-                }
-
-                // Subtle egg jitter / vibration
-                JitterEggs(0.025f * Mathf.Sin(t * Mathf.PI * 4f));
-
-                // Subtle crystal light pulse
-                if (crystalLight != null)
-                {
-                    crystalLight.intensity = originalCrystalIntensity + Mathf.Sin(t * Mathf.PI * 3f) * 3.5f;
-                    crystalLight.color = Color.Lerp(originalCrystalColor, new Color(0.85f, 0.2f, 1.0f), Mathf.PingPong(t * 2f, 0.6f));
-                }
-
-                yield return null;
-            }
-
-            ResetEggPositions();
-
-            // -------------------------------------------------------------------
-            // PHASE C: Something Moves in the Darkness (6 - 10s)
-            // Camera turns smoothly toward the dark cavern passage ahead (Z = 195)
-            // Ambient drops further, deep rumble swells, silhouette stirs in fog
-            // -------------------------------------------------------------------
-            currentState = CutsceneState.PhaseC_DarknessMovement;
-
-            if (ambientAudioSource != null)
-            {
-                StartCoroutine(FadeAudioVolume(ambientAudioSource, 0.05f, 2.0f));
-            }
-
-            PlaySound(rumbleClip, 0.85f);
-
-            // Dark passage is directly along the canyon ahead (+Z towards 195)
-            Vector3 darkPassageLookTarget = new Vector3(0f, -18f, 195f);
             if (ghostLeviathanObject != null)
             {
                 ghostLeviathanObject.SetActive(true);
-                ghostLeviathanObject.transform.position = spawnPosition;
-                ghostLeviathanObject.transform.rotation = Quaternion.Euler(0f, 180f, 0f);
+                ghostLeviathanObject.transform.position = spawnPos;
+                OrientLeviathanToward(camPos);
             }
 
-            elapsed = 0f;
-            while (elapsed < phaseCDuration)
+            LocateHeadBone();
+
+            // 4. Scanner Glitch & Ambient Sound Drop
+            if (scannerHUD != null) scannerHUD.TriggerMalfunction();
+            PlaySound(glitchClip, 0.85f);
+
+            if (ambientAudioSource != null)
             {
-                elapsed += Time.deltaTime;
-                if (diverCamera != null)
-                {
-                    diverCamera.SmoothLookToward(darkPassageLookTarget, 1.5f);
-                }
-
-                // Silhouette subtle stirring motion in distant darkness
-                if (ghostLeviathanObject != null)
-                {
-                    float driftY = Mathf.Sin(Time.time * 0.8f) * 0.5f;
-                    ghostLeviathanObject.transform.position = spawnPosition + new Vector3(0f, driftY, 0f);
-                }
-
-                yield return null;
+                originalAmbientVolume = ambientAudioSource.volume;
+                StartCoroutine(FadeAudioVolume(ambientAudioSource, 0.05f, 1.5f));
             }
 
             // -------------------------------------------------------------------
-            // PHASE D: Ghost Leviathan Reveal (10 - 15s)
-            // Creature emerges from fog, internal bioluminescent glow, mighty roar, dread pause
+            // PHASE 1: Terrifying Roar & Menacing Reveal in Front of User (1.2s)
+            // Emerging from the dark murky fog directly in front of the diver
             // -------------------------------------------------------------------
             currentState = CutsceneState.PhaseD_LeviathanReveal;
 
-            // Enable Leviathan Animator swimming motion
+            // Enable Leviathan swimming animation
             if (ghostLeviathanAnimator != null)
             {
                 ghostLeviathanAnimator.enabled = true;
-                ghostLeviathanAnimator.speed = 1.0f;
+                ghostLeviathanAnimator.speed = 1.3f;
             }
 
-            // Move Leviathan from deep darkness (Z = 195) forward into fog boundary (Z = 175)
-            float moveDuration = phaseDDuration * 0.65f;
-            elapsed = 0f;
-
-            // Play the iconic Leviathan roar
+            // Blood-curdling Roar & Cavern Rumble
             PlaySound(roarClip, 1.0f);
+            PlaySound(rumbleClip, 0.85f);
 
-            while (elapsed < moveDuration)
+            float revealElapsed = 0f;
+            while (revealElapsed < revealDuration)
             {
-                elapsed += Time.deltaTime;
-                float t = Mathf.SmoothStep(0f, 1f, elapsed / moveDuration);
+                revealElapsed += Time.deltaTime;
 
-                if (ghostLeviathanObject != null)
+                // Focus camera directly onto Leviathan's glowing head
+                if (diverCamera != null)
                 {
-                    ghostLeviathanObject.transform.position = Vector3.Lerp(spawnPosition, revealPosition, t);
-                    // Ensure Leviathan faces the diver's camera
-                    if (diverCamera != null)
-                    {
-                        Vector3 dirToPlayer = (diverCamera.transform.position - ghostLeviathanObject.transform.position).normalized;
-                        if (dirToPlayer.sqrMagnitude > 0.001f)
-                        {
-                            ghostLeviathanObject.transform.rotation = Quaternion.LookRotation(dirToPlayer);
-                        }
-                    }
+                    Vector3 headPos = GetHeadPosition();
+                    diverCamera.SmoothLookToward(headPos, 6.0f);
                 }
 
-                if (diverCamera != null && ghostLeviathanObject != null)
-                {
-                    // Focus camera lock onto the Leviathan's head/eyes
-                    Vector3 creatureHeadPos = ghostLeviathanObject.transform.position + Vector3.down * 0.5f;
-                    diverCamera.SmoothLookToward(creatureHeadPos, 2.5f);
-                }
-
-                yield return null;
-            }
-
-            // Dread Pause: Leviathan halts position, looming gigantically in tense silence
-            float pauseDuration = phaseDDuration - moveDuration;
-            elapsed = 0f;
-            while (elapsed < pauseDuration)
-            {
-                elapsed += Time.deltaTime;
-                if (diverCamera != null && ghostLeviathanObject != null)
-                {
-                    Vector3 creatureHeadPos = ghostLeviathanObject.transform.position + Vector3.down * 0.5f;
-                    diverCamera.SmoothLookToward(creatureHeadPos, 3.0f);
-                }
+                OrientLeviathanToward(camPos);
                 yield return null;
             }
 
             // -------------------------------------------------------------------
-            // PHASE E: The High-Speed Attack Charge (15 - 18s)
-            // Accelerates exponentially directly toward the diver's camera
+            // PHASE 2: Rapid Predatory Attack Charge Directly into Diver (2.2s)
+            // High-speed aggressive acceleration straight into the camera lens
             // -------------------------------------------------------------------
             currentState = CutsceneState.PhaseE_Charge;
 
-            PlaySound(rushClip, 0.95f);
+            PlaySound(rushClip, 1.0f);
 
-            Vector3 chargeStartPos = ghostLeviathanObject != null ? ghostLeviathanObject.transform.position : revealPosition;
-            Vector3 chargeTargetPos = diverCamera != null ? diverCamera.transform.position : new Vector3(0f, -22f, 150f);
-
-            // Increase swimming animation speed during charge
             if (ghostLeviathanAnimator != null)
             {
-                ghostLeviathanAnimator.speed = 1.8f;
+                ghostLeviathanAnimator.applyRootMotion = false;
+                ghostLeviathanAnimator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+                ghostLeviathanAnimator.speed = 2.8f;
             }
 
-            elapsed = 0f;
-            while (elapsed < phaseEDuration)
-            {
-                elapsed += Time.deltaTime;
-                float normalizedTime = Mathf.Clamp01(elapsed / phaseEDuration);
+            Vector3 chargeStartPos = ghostLeviathanObject != null ? ghostLeviathanObject.transform.position : spawnPos;
+            Vector3 finalCamPos = diverCamera != null ? diverCamera.transform.position : camPos;
+            Vector3 rushDir = (finalCamPos - chargeStartPos).normalized;
+            // Overshoot target by 5m so creature charges cleanly through the player's view
+            Vector3 rushTarget = finalCamPos + rushDir * 5.0f;
+            float chargeElapsed = 0f;
 
-                // Non-linear acceleration curve: starts deliberate, accelerates to extreme velocity
-                float curveT = Mathf.Pow(normalizedTime, 2.2f);
+            while (chargeElapsed < chargeDuration)
+            {
+                chargeElapsed += Time.deltaTime;
+                float normalizedT = Mathf.Clamp01(chargeElapsed / chargeDuration);
+
+                // Smooth predatory surge curve: clearly visible rapid approach
+                float curveT = Mathf.SmoothStep(0f, 1f, normalizedT);
+
+                Vector3 currentCamPos = diverCamera != null ? diverCamera.transform.position : finalCamPos;
 
                 if (ghostLeviathanObject != null)
                 {
-                    ghostLeviathanObject.transform.position = Vector3.Lerp(chargeStartPos, chargeTargetPos, curveT);
+                    // Move the Leviathan along the charge path
+                    ghostLeviathanObject.transform.position = Vector3.Lerp(chargeStartPos, rushTarget, curveT);
 
-                    Vector3 dir = (chargeTargetPos - ghostLeviathanObject.transform.position).normalized;
-                    if (dir.sqrMagnitude > 0.001f)
-                    {
-                        ghostLeviathanObject.transform.rotation = Quaternion.LookRotation(dir);
-                    }
+                    // Orient directly at camera
+                    OrientLeviathanToward(currentCamPos);
 
-                    // Check if creature has reached close proximity to trigger impact
-                    float dist = Vector3.Distance(ghostLeviathanObject.transform.position, chargeTargetPos);
-                    if (dist < 2.0f && normalizedTime > 0.75f)
+                    // Check head distance to camera: trigger lethal impact upon collision
+                    Vector3 headPos = GetHeadPosition();
+                    float distToCam = Vector3.Distance(headPos, currentCamPos);
+                    if (distToCam < 3.2f && normalizedT > 0.35f)
                     {
-                        break;
+                        break; // Lethal bite impact!
                     }
                 }
 
-                if (diverCamera != null && ghostLeviathanObject != null)
+                if (diverCamera != null)
                 {
-                    diverCamera.SmoothLookToward(ghostLeviathanObject.transform.position, 4.5f);
+                    Vector3 headPos = GetHeadPosition();
+                    diverCamera.SmoothLookToward(headPos, 16.0f);
                 }
 
                 yield return null;
             }
 
             // -------------------------------------------------------------------
-            // PHASE F: Impact and Deterministic Death (18 - 21s)
-            // Violent camera jolt/shake, impact crunch, diver health zeroed & death invoked
+            // PHASE 3: Lethal Impact, Violent Shake & Suit Destruction (1.2s)
+            // Massive jaws crush into camera, suit breached, health zeroed
             // -------------------------------------------------------------------
             currentState = CutsceneState.PhaseF_ImpactDeath;
 
             PlaySound(impactClip, 1.0f);
 
-            // Detach Main Camera from Diver player so it survives player destruction!
-            if (diverCamera != null && diverCamera.transform.parent != null)
+            // Double guarantee camera is detached and parented to FinalCutsceneManager
+            if (diverCamera != null && diverCamera.transform.parent != this.transform)
             {
                 diverCamera.transform.SetParent(this.transform, worldPositionStays: true);
             }
 
-            // Deterministic Lethal Damage: Diver suit compromised, died as required
+            // Fatal Damage: Suit breached, health zeroed
             if (diverHealth != null)
             {
-                diverHealth.TriggerCinematicDeath(2.0f);
+                diverHealth.TriggerCinematicDeath(1.5f);
             }
 
             // Violent Camera Jolt & Shake
             yield return StartCoroutine(CameraShakeRoutine(impactShakeDuration, impactShakeIntensity));
 
             // -------------------------------------------------------------------
-            // PHASE G: Final Fade to Black and Ending Screen (21 - 30s)
-            // Fade screen completely, pause in silence, display ABYSSAL — SIGNAL LOST
+            // PHASE 4: Fade to Black and Restrained Ending Screen
             // -------------------------------------------------------------------
             currentState = CutsceneState.PhaseG_EndingScreen;
 
-            // Fade to complete black
-            elapsed = 0f;
-            while (elapsed < fadeDuration)
+            float fadeElapsed = 0f;
+            while (fadeElapsed < fadeDuration)
             {
-                elapsed += Time.deltaTime;
-                screenFadeAlpha = Mathf.Clamp01(elapsed / fadeDuration);
+                fadeElapsed += Time.deltaTime;
+                screenFadeAlpha = Mathf.Clamp01(fadeElapsed / fadeDuration);
                 yield return null;
             }
             screenFadeAlpha = 1.0f;
 
-            // Silence all ambient sound
             if (ambientAudioSource != null) ambientAudioSource.Stop();
             if (cutsceneAudioSource != null) cutsceneAudioSource.Stop();
 
-            // Pause in pitch darkness
             yield return new WaitForSeconds(endingTextDelay);
-
-            // Show clean, restrained ending screen
             showEndingScreen = true;
             Debug.Log("[FinalCutsceneController] === CINEMATIC SEQUENCE COMPLETE: SIGNAL LOST ===");
+        }
+
+        private void EnsureLeviathanInstance()
+        {
+            if (ghostLeviathanObject == null)
+            {
+                ghostLeviathanObject = GameObject.Find("Ghost_Leviathan");
+                if (ghostLeviathanObject == null) ghostLeviathanObject = GameObject.Find("GhostLeviathan");
+            }
+
+            if (ghostLeviathanObject == null)
+            {
+#if UNITY_EDITOR
+                GameObject fbx = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>("Assets/ghost-leviathan/source/Ghost_Leviathan.fbx");
+                if (fbx != null)
+                {
+                    ghostLeviathanObject = Instantiate(fbx);
+                    ghostLeviathanObject.name = "Ghost_Leviathan";
+                }
+#endif
+            }
+
+            if (ghostLeviathanObject != null)
+            {
+                ghostLeviathanObject.transform.localScale = Vector3.one * 35.0f;
+
+                if (ghostLeviathanAnimator == null)
+                {
+                    ghostLeviathanAnimator = ghostLeviathanObject.GetComponentInChildren<Animator>();
+                    if (ghostLeviathanAnimator == null)
+                    {
+                        ghostLeviathanAnimator = ghostLeviathanObject.AddComponent<Animator>();
+                    }
+                }
+
+                if (ghostLeviathanAnimator != null)
+                {
+                    ghostLeviathanAnimator.applyRootMotion = false;
+                    ghostLeviathanAnimator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+                }
+
+                foreach (var col in ghostLeviathanObject.GetComponentsInChildren<Collider>(true))
+                {
+                    col.isTrigger = true;
+                }
+
+#if UNITY_EDITOR
+                Material ghostMat = UnityEditor.AssetDatabase.LoadAssetAtPath<Material>("Assets/ghost-leviathan/Materials/Ghost_Leviathan_shell_spec.mat");
+                if (ghostMat != null)
+                {
+                    ghostMat.EnableKeyword("_EMISSION");
+                    ghostMat.SetColor("_EmissionColor", new Color(0.22f, 0.88f, 1.0f) * 2.8f);
+                    foreach (var r in ghostLeviathanObject.GetComponentsInChildren<Renderer>(true))
+                    {
+                        r.sharedMaterial = ghostMat;
+                    }
+                }
+
+                var controller = UnityEditor.AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>("Assets/ghost-leviathan/GhostLeviathanController.controller");
+                if (controller != null && ghostLeviathanAnimator != null)
+                {
+                    ghostLeviathanAnimator.runtimeAnimatorController = controller;
+                }
+#endif
+                LocateHeadBone();
+
+                // Ensure head glow light
+                Transform lightParent = ghostHeadTransform != null ? ghostHeadTransform : ghostLeviathanObject.transform;
+                Light headLight = lightParent.GetComponentInChildren<Light>();
+                if (headLight == null)
+                {
+                    GameObject lg = new GameObject("LeviathanHeadGlow");
+                    lg.transform.SetParent(lightParent, false);
+                    headLight = lg.AddComponent<Light>();
+                }
+                headLight.type = LightType.Point;
+                headLight.range = 50f;
+                headLight.intensity = 6.5f;
+                headLight.color = new Color(0.2f, 0.9f, 1.0f);
+            }
+        }
+
+        private void OrientLeviathanToward(Vector3 targetPos)
+        {
+            if (ghostLeviathanObject == null) return;
+            Vector3 dir = (targetPos - ghostLeviathanObject.transform.position).normalized;
+            if (dir.sqrMagnitude < 0.001f) return;
+
+            ghostLeviathanObject.transform.rotation = Quaternion.LookRotation(dir, Vector3.up);
+        }
+
+        private Vector3 GetHeadPosition()
+        {
+            if (ghostHeadTransform != null)
+            {
+                return ghostHeadTransform.position;
+            }
+
+            if (ghostLeviathanObject != null)
+            {
+                return ghostLeviathanObject.transform.position + ghostLeviathanObject.transform.forward * 3.5f;
+            }
+
+            return Vector3.zero;
+        }
+
+        private void LocateHeadBone()
+        {
+            if (ghostHeadTransform != null) return;
+
+            if (ghostLeviathanObject != null)
+            {
+                ghostHeadTransform = ghostLeviathanObject.transform.Find("Armature/Ghost_Leviathan_anim/root/neck1/neck2/neck3/head");
+                if (ghostHeadTransform == null)
+                {
+                    foreach (Transform child in ghostLeviathanObject.GetComponentsInChildren<Transform>())
+                    {
+                        if (child.name.Equals("head", StringComparison.OrdinalIgnoreCase))
+                        {
+                            ghostHeadTransform = child;
+                            break;
+                        }
+                    }
+                }
+            }
         }
 
         private IEnumerator CameraShakeRoutine(float duration, float intensity)
@@ -457,9 +603,9 @@ namespace Abyssal.Gameplay
                 elapsed += Time.deltaTime;
                 float strength = Mathf.Lerp(intensity, 0f, elapsed / duration);
 
-                float pitchOffset = UnityEngine.Random.Range(-1f, 1f) * strength * 20f;
-                float yawOffset = UnityEngine.Random.Range(-1f, 1f) * strength * 20f;
-                float rollOffset = UnityEngine.Random.Range(-1f, 1f) * strength * 25f;
+                float pitchOffset = UnityEngine.Random.Range(-1f, 1f) * strength * 22f;
+                float yawOffset = UnityEngine.Random.Range(-1f, 1f) * strength * 22f;
+                float rollOffset = UnityEngine.Random.Range(-1f, 1f) * strength * 28f;
 
                 diverCamera.transform.rotation = originalRot * Quaternion.Euler(pitchOffset, yawOffset, rollOffset);
                 yield return null;
@@ -510,8 +656,15 @@ namespace Abyssal.Gameplay
 
         private void PlaySound(AudioClip clip, float volume = 1.0f)
         {
-            if (clip == null || cutsceneAudioSource == null) return;
-            cutsceneAudioSource.PlayOneShot(clip, volume);
+            if (cutsceneAudioSource == null) return;
+            if (clip != null)
+            {
+                cutsceneAudioSource.PlayOneShot(clip, volume);
+            }
+            else if (roarClip != null)
+            {
+                cutsceneAudioSource.PlayOneShot(roarClip, volume * 0.75f);
+            }
         }
 
         private void ResolveSceneReferences()
@@ -542,21 +695,21 @@ namespace Abyssal.Gameplay
                 if (crystalGO != null) crystalTransform = crystalGO.transform;
             }
 
+            if (crystalTransform != null)
+            {
+                var trigger = crystalTransform.GetComponent<FinalCutsceneTrigger>();
+                if (trigger == null)
+                {
+                    crystalTransform.gameObject.AddComponent<FinalCutsceneTrigger>();
+                }
+            }
+
             if (crystalTransform != null && crystalLight == null)
             {
                 crystalLight = crystalTransform.GetComponentInChildren<Light>();
             }
 
-            if (ghostLeviathanObject == null)
-            {
-                ghostLeviathanObject = GameObject.Find("Ghost_Leviathan");
-                if (ghostLeviathanObject == null) ghostLeviathanObject = GameObject.Find("GhostLeviathan");
-            }
-
-            if (ghostLeviathanObject != null && ghostLeviathanAnimator == null)
-            {
-                ghostLeviathanAnimator = ghostLeviathanObject.GetComponentInChildren<Animator>();
-            }
+            EnsureLeviathanInstance();
 
             if (ambientAudioSource == null && Camera.main != null)
             {
@@ -606,13 +759,11 @@ namespace Abyssal.Gameplay
 
         private void PrepareProceduralAudio()
         {
-            // Load official roar clip if not assigned
             if (roarClip == null)
             {
                 roarClip = Resources.Load<AudioClip>("Audio/Leviathan_Roar");
             }
 
-            // Synthesize high-quality procedural sound effects if asset clips are null
             if (glitchClip == null) glitchClip = SynthesizeGlitchSound();
             if (rumbleClip == null) rumbleClip = SynthesizeSubRumbleSound();
             if (rushClip == null) rushClip = SynthesizeRushingWaterSound();
@@ -620,7 +771,7 @@ namespace Abyssal.Gameplay
         }
 
         // =======================================================================
-        // PROCEDURAL AUDIO SYNTHESIZERS (Guarantees zero missing sound dependencies)
+        // PROCEDURAL AUDIO SYNTHESIZERS (Guarantees zero missing audio dependencies)
         // =======================================================================
         private AudioClip SynthesizeGlitchSound()
         {
@@ -669,7 +820,7 @@ namespace Abyssal.Gameplay
         private AudioClip SynthesizeRushingWaterSound()
         {
             int sampleRate = 44100;
-            float duration = 3.2f;
+            float duration = 2.5f;
             int numSamples = (int)(sampleRate * duration);
             float[] samples = new float[numSamples];
 
@@ -678,10 +829,9 @@ namespace Abyssal.Gameplay
             {
                 float t = (float)i / sampleRate;
                 float white = UnityEngine.Random.value * 2f - 1f;
-                // Simple low-pass filter
-                lastSample = Mathf.Lerp(lastSample, white, 0.18f);
+                lastSample = Mathf.Lerp(lastSample, white, 0.22f);
                 float accelEnv = Mathf.Pow(t / duration, 1.8f);
-                samples[i] = lastSample * accelEnv * 0.75f;
+                samples[i] = lastSample * accelEnv * 0.85f;
             }
 
             AudioClip clip = AudioClip.Create("Synthesized_RushingWater", numSamples, 1, sampleRate, false);

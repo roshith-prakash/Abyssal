@@ -150,6 +150,9 @@ namespace Abyssal.Player
 
         private void LateUpdate()
         {
+            // During cutscene or when controls disabled, allow camera to be detached or manipulated freely
+            if (!isControlsEnabled) return;
+
             // Safety net: if the camera has somehow been unparented (Unity quirk with
             // prefab-instance stripped transforms), re-parent and restore position.
             // Only re-parent if playerBody is still valid.
@@ -172,7 +175,19 @@ namespace Abyssal.Player
         private void HandleMouseLook()
         {
             if (!isControlsEnabled) return;
-            if (Cursor.lockState != CursorLockMode.Locked) return;
+
+            // In Editor or Game view, allow mouse look if locked or when holding mouse buttons
+            bool canLook = (Cursor.lockState == CursorLockMode.Locked);
+#if UNITY_EDITOR
+            if (!canLook)
+            {
+#if ENABLE_INPUT_SYSTEM
+                if (Mouse.current != null && (Mouse.current.rightButton.isPressed || Mouse.current.leftButton.isPressed)) canLook = true;
+#endif
+                try { if (Input.GetMouseButton(1) || Input.GetMouseButton(0)) canLook = true; } catch { }
+            }
+#endif
+            if (!canLook) return;
 
             Vector2 raw = ReadMouseDelta();
 
@@ -231,13 +246,13 @@ namespace Abyssal.Player
             bool click = false;
 
 #if ENABLE_INPUT_SYSTEM
-            if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame) esc   = true;
-            if (Mouse.current    != null && Mouse.current.leftButton.wasPressedThisFrame)   click = true;
+            if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame) esc = true;
+            if (Mouse.current != null && (Mouse.current.leftButton.wasPressedThisFrame || Mouse.current.rightButton.wasPressedThisFrame)) click = true;
 #endif
             try
             {
-                if (Input.GetKeyDown(KeyCode.Escape)) esc   = true;
-                if (Input.GetMouseButtonDown(0))      click = true;
+                if (Input.GetKeyDown(KeyCode.Escape)) esc = true;
+                if (Input.GetMouseButtonDown(0) || Input.GetMouseButtonDown(1)) click = true;
             }
             catch (System.Exception) { }
 

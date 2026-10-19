@@ -87,6 +87,42 @@ namespace Abyssal.Player
             }
         }
 
+        private void OnTriggerEnter(Collider other)
+        {
+            if (IsDead) return;
+
+            GameObject otherObj = other.gameObject;
+            string otherName = otherObj.name.ToLower();
+
+            bool isLeviathan = other.CompareTag("Leviathan") ||
+                               otherName.Contains("leviathan") ||
+                               other.GetComponentInParent<Animator>() != null && otherName.Contains("ghost");
+
+            bool isHazard = other.CompareTag("Hazard") ||
+                            otherName.Contains("hazard") ||
+                            other.GetComponent<HazardDamage>() != null ||
+                            other.GetComponentInParent<HazardDamage>() != null;
+
+            if (isLeviathan || isHazard)
+            {
+                float damage = defaultCollisionDamage;
+
+                HazardDamage hazardComp = other.GetComponent<HazardDamage>();
+                if (hazardComp == null) hazardComp = other.GetComponentInParent<HazardDamage>();
+
+                if (hazardComp != null)
+                {
+                    damage = hazardComp.DamageAmount;
+                }
+                else if (isLeviathan)
+                {
+                    damage = 50f;
+                }
+
+                TakeDamage(damage, $"Trigger collision with '{otherObj.name}'");
+            }
+        }
+
         [Tooltip("Delay in seconds before destroying player GameObject on death.")]
         [SerializeField] private float deathDestroyDelay = 0f;
 
@@ -138,6 +174,13 @@ namespace Abyssal.Player
             var hud = FindAnyObjectByType<MonoBehaviour>(); // Fallback / placeholder notification
 
             // Mandatory requirement: Destroy the player GameObject
+            // Safely detach camera so the scene never loses a rendering camera
+            Camera cam = GetComponentInChildren<Camera>();
+            if (cam != null)
+            {
+                cam.transform.SetParent(null, worldPositionStays: true);
+            }
+
             if (deathDestroyDelay > 0f)
             {
                 Destroy(gameObject, deathDestroyDelay);

@@ -86,6 +86,25 @@ namespace Abyssal.Player
             }
         }
 
+        /// <summary>
+        /// Instantly teleports the diver and its Rigidbody to a target world position.
+        /// </summary>
+        public void Teleport(Vector3 position)
+        {
+            if (diverRigidbody != null)
+            {
+                diverRigidbody.position = position;
+#if UNITY_6000_0_OR_NEWER
+                diverRigidbody.linearVelocity = Vector3.zero;
+                diverRigidbody.angularVelocity = Vector3.zero;
+#else
+                diverRigidbody.velocity = Vector3.zero;
+                diverRigidbody.angularVelocity = Vector3.zero;
+#endif
+            }
+            transform.position = position;
+        }
+
         // -----------------------------------------------------------------------
         private void Awake()
         {
@@ -104,6 +123,13 @@ namespace Abyssal.Player
                 diverRigidbody.constraints = RigidbodyConstraints.FreezeRotation;
                 diverRigidbody.interpolation = RigidbodyInterpolation.Interpolate;
                 diverRigidbody.collisionDetectionMode = CollisionDetectionMode.Continuous;
+#if UNITY_6000_0_OR_NEWER
+                diverRigidbody.linearDamping = 2.5f;
+                diverRigidbody.angularDamping = 5.0f;
+#else
+                diverRigidbody.drag = 2.5f;
+                diverRigidbody.angularDrag = 5.0f;
+#endif
             }
 
             // Explicitly parent the camera to this Diver root at runtime.
@@ -129,11 +155,24 @@ namespace Abyssal.Player
             // Apply velocity through Rigidbody if available for proper PhysX collisions
             if (diverRigidbody != null && !diverRigidbody.isKinematic)
             {
+                if (!isControlsEnabled)
+                {
 #if UNITY_6000_0_OR_NEWER
-                diverRigidbody.linearVelocity = currentVelocity;
+                    diverRigidbody.linearVelocity = Vector3.zero;
+                    diverRigidbody.angularVelocity = Vector3.zero;
 #else
-                diverRigidbody.velocity = currentVelocity;
+                    diverRigidbody.velocity = Vector3.zero;
+                    diverRigidbody.angularVelocity = Vector3.zero;
 #endif
+                }
+                else
+                {
+#if UNITY_6000_0_OR_NEWER
+                    diverRigidbody.linearVelocity = currentVelocity;
+#else
+                    diverRigidbody.velocity = currentVelocity;
+#endif
+                }
             }
         }
 
@@ -167,17 +206,18 @@ namespace Abyssal.Player
 
             if (desiredDir.sqrMagnitude > 1f) desiredDir.Normalize();
 
-            Vector3 targetVelocity = desiredDir * targetSpeed + Vector3.up * (inputDir.y * verticalSpeed);
+            // Neutral buoyancy gentle bobbing when idle (bounded sine offset, not unbounded accumulation)
+            float buoyancyY = 0f;
+            if (enableBuoyancyDrift && inputDir.sqrMagnitude < 0.01f && currentVelocity.sqrMagnitude < 0.2f)
+            {
+                buoyancyY = Mathf.Sin(Time.time * buoyancyFrequency) * buoyancyDriftSpeed;
+            }
+
+            Vector3 targetVelocity = desiredDir * targetSpeed + Vector3.up * (inputDir.y * verticalSpeed + buoyancyY);
 
             // Smooth acceleration / water drag
             float rate = targetVelocity.sqrMagnitude > 0.01f ? acceleration : drag;
             currentVelocity = Vector3.Lerp(currentVelocity, targetVelocity, rate * Time.deltaTime);
-
-            // Neutral buoyancy drift when still
-            if (enableBuoyancyDrift && currentVelocity.sqrMagnitude < 0.1f)
-            {
-                currentVelocity.y += Mathf.Sin(Time.time * buoyancyFrequency) * buoyancyDriftSpeed * Time.deltaTime;
-            }
 
             // Fallback: If no dynamic Rigidbody is attached, translate transform directly
             if (diverRigidbody == null || diverRigidbody.isKinematic)
@@ -207,10 +247,15 @@ namespace Abyssal.Player
             if (Gamepad.current != null)
             {
                 Vector2 stick = Gamepad.current.leftStick.ReadValue();
-                input.x += stick.x;
-                input.z += stick.y;
-                if (Gamepad.current.rightTrigger.isPressed)  input.y += 1f;
-                if (Gamepad.current.leftTrigger.isPressed)   input.y -= 1f;
+                if (stick.sqrMagnitude > 0.04f)
+                {
+                    input.x += stick.x;
+                    input.z += stick.y;
+                }
+                float rt = Gamepad.current.rightTrigger.ReadValue();
+                if (rt > 0.25f) input.y += rt;
+                float lt = Gamepad.current.leftTrigger.ReadValue();
+                if (lt > 0.25f) input.y -= lt;
                 if (Gamepad.current.leftStickButton.isPressed) isSprinting = true;
             }
 #endif

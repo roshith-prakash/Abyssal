@@ -103,15 +103,24 @@ namespace Abyssal.Gameplay
                 leviathanAnimator = leviathanObject.GetComponentInChildren<Animator>();
             }
 
-            // Ensure Leviathan has a Collider and HazardDamage / Hazard tag
+            // Ensure Leviathan colliders are strictly triggers so PhysX never applies explosive collision forces
             if (leviathanObject != null)
             {
-                Collider col = leviathanObject.GetComponent<Collider>();
-                if (col == null)
+                Collider[] colliders = leviathanObject.GetComponentsInChildren<Collider>(true);
+                if (colliders == null || colliders.Length == 0)
                 {
                     BoxCollider box = leviathanObject.AddComponent<BoxCollider>();
-                    box.size = new Vector3(8f, 6f, 25f);
-                    box.center = new Vector3(0f, 0f, 5f);
+                    float maxScale = Mathf.Max(0.001f, Mathf.Max(leviathanObject.transform.lossyScale.x, Mathf.Max(leviathanObject.transform.lossyScale.y, leviathanObject.transform.lossyScale.z)));
+                    box.size = new Vector3(8f / maxScale, 6f / maxScale, 20f / maxScale);
+                    box.center = new Vector3(0f, 0f, 4f / maxScale);
+                    box.isTrigger = true;
+                }
+                else
+                {
+                    foreach (var c in colliders)
+                    {
+                        c.isTrigger = true;
+                    }
                 }
 
                 HazardDamage hazard = leviathanObject.GetComponent<HazardDamage>();

@@ -123,13 +123,15 @@ namespace Abyssal.Gameplay
             {
                 FinalCutsceneController.Instance.StartCutscene();
             }
-            else if (LeviathanEncounter.Instance != null)
-            {
-                LeviathanEncounter.Instance.StartRevealSequence();
-            }
             else
             {
-                Debug.LogWarning("[CrystalInteractable] Cutscene controller instance not found in scene!");
+                var controller = FindAnyObjectByType<FinalCutsceneController>();
+                if (controller == null)
+                {
+                    GameObject manager = new GameObject("FinalCutsceneManager");
+                    controller = manager.AddComponent<FinalCutsceneController>();
+                }
+                controller.StartCutscene();
             }
         }
 

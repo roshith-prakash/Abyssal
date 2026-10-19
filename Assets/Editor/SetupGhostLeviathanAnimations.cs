@@ -111,11 +111,23 @@ namespace Abyssal.Editor
                 AssetDatabase.SaveAssets();
             }
 
-            // 4. Find Ghost_Leviathan in the scene
+            // 4. Find or Instantiate Ghost_Leviathan in the scene
             GameObject ghostGO = GameObject.Find("Ghost_Leviathan");
+            if (ghostGO == null) ghostGO = GameObject.Find("GhostLeviathan");
             if (ghostGO == null)
             {
-                Debug.LogWarning("[Abyssal] Ghost_Leviathan GameObject not found in scene!");
+                GameObject fbx = AssetDatabase.LoadAssetAtPath<GameObject>(FbxPath);
+                if (fbx != null)
+                {
+                    ghostGO = (GameObject)PrefabUtility.InstantiatePrefab(fbx);
+                    ghostGO.name = "Ghost_Leviathan";
+                    Undo.RegisterCreatedObjectUndo(ghostGO, "Create Ghost_Leviathan");
+                }
+            }
+
+            if (ghostGO == null)
+            {
+                Debug.LogWarning("[Abyssal] Ghost_Leviathan GameObject could not be instantiated!");
                 return;
             }
 
