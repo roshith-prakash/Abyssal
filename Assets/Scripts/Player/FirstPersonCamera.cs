@@ -45,6 +45,8 @@ namespace Abyssal.Player
         private Vector2 smoothedDelta  = Vector2.zero;
         private Vector2 smoothVelocity = Vector2.zero;
 
+        private Vector3 localOffsetFromBody; // camera's local offset from playerBody, set once at Start
+
         private void Awake()
         {
             if (playerBody == null)
@@ -55,6 +57,15 @@ namespace Abyssal.Player
                     GameObject diver = GameObject.Find("Diver");
                     if (diver != null) playerBody = diver.transform;
                 }
+            }
+
+            // Re-establish the parent-child link at runtime.
+            // A camera whose m_Father points to a stripped prefab transform in the
+            // scene YAML may not have its position inherited during Play Mode.
+            // Calling SetParent here guarantees the link is live.
+            if (playerBody != null && transform.parent != playerBody)
+            {
+                transform.SetParent(playerBody, worldPositionStays: true);
             }
         }
 
@@ -67,10 +78,32 @@ namespace Abyssal.Player
             currentPitch = transform.localEulerAngles.x;
             if (currentPitch > 180f) currentPitch -= 360f;
 
+            // Record the local offset so LateUpdate can re-apply if the parent link ever breaks
+            localOffsetFromBody = transform.localPosition;
+
+            if (diverFlashlight == null)
+                diverFlashlight = GetComponentInChildren<Light>();
+
             if (diverFlashlight != null)
+            {
                 diverFlashlight.enabled = startFlashlightOn;
+                if (diverFlashlight.intensity < 3.0f) diverFlashlight.intensity = 3.8f;
+                if (diverFlashlight.range < 45f) diverFlashlight.range = 55f;
+                if (diverFlashlight.spotAngle < 60f) diverFlashlight.spotAngle = 68f;
+            }
 
             LockCursor(true);
+        }
+
+        private void LateUpdate()
+        {
+            // Safety net: if the camera has somehow been unparented (Unity quirk with
+            // prefab-instance stripped transforms), re-parent and restore position.
+            if (playerBody != null && transform.parent != playerBody)
+            {
+                transform.SetParent(playerBody, worldPositionStays: false);
+                transform.localPosition = localOffsetFromBody;
+            }
         }
 
         private void Update()

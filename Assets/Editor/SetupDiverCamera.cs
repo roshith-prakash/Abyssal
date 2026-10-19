@@ -131,17 +131,9 @@ namespace Abyssal.Editor
             soCam.FindProperty("diverFlashlight").objectReferenceValue = fl;
             soCam.ApplyModifiedProperties();
 
-            // Setup CharacterController
-            CharacterController cc = diverGO.GetComponent<CharacterController>();
-            if (cc == null)
-            {
-                cc = diverGO.AddComponent<CharacterController>();
-            }
-            cc.height = 1.9f;
-            cc.radius = 0.45f;
-            cc.center = new Vector3(0f, 0.95f, 0f);
-            cc.skinWidth = 0.08f;
-            cc.minMoveDistance = 0.001f;
+            // CharacterController intentionally NOT added — DiverMovement uses direct
+            // transform.position translation for 6DOF underwater movement.
+            // A CharacterController would fight PhysX and freeze the diver in place.
 
             // Setup Animator & Animations
             Animator anim = diverGO.GetComponent<Animator>();

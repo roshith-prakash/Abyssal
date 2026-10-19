@@ -50,6 +50,10 @@ namespace Abyssal.Player
         [SerializeField] private float finKickFrequency = 2.5f;
         [SerializeField] private float finKickRollAmount = 0.5f;
 
+        [Header("Physics Settings")]
+        [Tooltip("Optional Rigidbody for PhysX collision handling (useGravity should be false).")]
+        [SerializeField] private Rigidbody diverRigidbody;
+
         private Vector3 currentVelocity = Vector3.zero;
         private float   finKickTimer    = 0f;
 
@@ -64,6 +68,27 @@ namespace Abyssal.Player
 
             if (diverAnimator == null)
                 diverAnimator = GetComponentInChildren<Animator>();
+
+            if (diverRigidbody == null)
+                diverRigidbody = GetComponent<Rigidbody>();
+
+            if (diverRigidbody != null)
+            {
+                diverRigidbody.useGravity = false;
+                diverRigidbody.constraints = RigidbodyConstraints.FreezeRotation;
+                diverRigidbody.interpolation = RigidbodyInterpolation.Interpolate;
+                diverRigidbody.collisionDetectionMode = CollisionDetectionMode.Continuous;
+            }
+
+            // Explicitly parent the camera to this Diver root at runtime.
+            // Prefab-instance stripped transforms can fail to propagate position
+            // to non-prefab children in Unity Play Mode. Doing it here — from the
+            // script that IS on the Diver — is unambiguous and always works.
+            if (cameraTransform != null && cameraTransform.parent != this.transform)
+            {
+                cameraTransform.SetParent(this.transform, worldPositionStays: true);
+                Debug.Log("[DiverMovement] Camera parented to Diver root at runtime.");
+            }
         }
 
         private void Update()
@@ -71,6 +96,19 @@ namespace Abyssal.Player
             HandleMovement();
             HandleSwimmingSway();
             UpdateAnimator();
+        }
+
+        private void FixedUpdate()
+        {
+            // Apply velocity through Rigidbody if available for proper PhysX collisions
+            if (diverRigidbody != null && !diverRigidbody.isKinematic)
+            {
+#if UNITY_6000_0_OR_NEWER
+                diverRigidbody.linearVelocity = currentVelocity;
+#else
+                diverRigidbody.velocity = currentVelocity;
+#endif
+            }
         }
 
         // -----------------------------------------------------------------------
@@ -109,8 +147,11 @@ namespace Abyssal.Player
                 currentVelocity.y += Mathf.Sin(Time.time * buoyancyFrequency) * buoyancyDriftSpeed * Time.deltaTime;
             }
 
-            // Directly translate the diver — no CharacterController, no collision blocking
-            transform.position += currentVelocity * Time.deltaTime;
+            // Fallback: If no dynamic Rigidbody is attached, translate transform directly
+            if (diverRigidbody == null || diverRigidbody.isKinematic)
+            {
+                transform.position += currentVelocity * Time.deltaTime;
+            }
         }
 
         // -----------------------------------------------------------------------
