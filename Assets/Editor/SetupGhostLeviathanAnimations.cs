@@ -29,18 +29,21 @@ namespace Abyssal.Editor
 
             // 1. Ensure FBX clip has loopTime enabled
             ModelImporter importer = AssetImporter.GetAtPath(FbxPath) as ModelImporter;
-            if (importer != null && (importer.clipAnimations == null || importer.clipAnimations.Length == 0))
+            if (importer != null)
             {
-                var defaultClips = importer.defaultClipAnimations;
-                if (defaultClips != null && defaultClips.Length > 0)
+                if (importer.clipAnimations == null || importer.clipAnimations.Length == 0)
                 {
-                    foreach (var c in defaultClips)
+                    var defaultClips = importer.defaultClipAnimations;
+                    if (defaultClips != null && defaultClips.Length > 0)
                     {
-                        c.loopTime = true;
+                        foreach (var c in defaultClips)
+                        {
+                            c.loopTime = true;
+                        }
+                        importer.clipAnimations = defaultClips;
+                        importer.SaveAndReimport();
+                        Debug.Log("[Abyssal] Configured Ghost Leviathan animation clips to loop and reimported FBX.");
                     }
-                    importer.clipAnimations = defaultClips;
-                    importer.SaveAndReimport();
-                    Debug.Log("[Abyssal] Configured Ghost Leviathan animation clips to loop and reimported FBX.");
                 }
             }
             else

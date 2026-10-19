@@ -5979,6 +5979,7 @@ MonoBehaviour:
   currentHealth: 0
   defaultCollisionDamage: 25
   damageCooldown: 0.8
+  deathDestroyDelay: 0
 --- !u!114 &1934393649872514346
 MonoBehaviour:
   m_ObjectHideFlags: 0

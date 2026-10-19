@@ -87,6 +87,9 @@ namespace Abyssal.Player
             }
         }
 
+        [Tooltip("Delay in seconds before destroying player GameObject on death.")]
+        [SerializeField] private float deathDestroyDelay = 0f;
+
         /// <summary>
         /// Reduces health by specified amount and checks for death.
         /// </summary>
@@ -108,6 +111,20 @@ namespace Abyssal.Player
             }
         }
 
+        /// <summary>
+        /// Explicit lethal death trigger for the cutscene impact.
+        /// Zeroes health, invokes death events, and schedules destruction of the GameObject.
+        /// </summary>
+        public void TriggerCinematicDeath(float destroyDelay = 3.0f)
+        {
+            if (IsDead) return;
+            deathDestroyDelay = destroyDelay;
+            currentHealth = 0f;
+            Debug.Log($"[DiverHealth] Scripted cutscene lethal impact! Diver suit compromised. Remaining Health: 0 HP. Destroy scheduled in {destroyDelay}s.");
+            OnHealthChanged?.Invoke(currentHealth, maxHealth);
+            Die();
+        }
+
         // -------------------------------------------------------------------
         // Requirement: When health is less than or equal to zero, call Destroy(gameObject)
         // -------------------------------------------------------------------
@@ -121,7 +138,14 @@ namespace Abyssal.Player
             var hud = FindAnyObjectByType<MonoBehaviour>(); // Fallback / placeholder notification
 
             // Mandatory requirement: Destroy the player GameObject
-            Destroy(gameObject);
+            if (deathDestroyDelay > 0f)
+            {
+                Destroy(gameObject, deathDestroyDelay);
+            }
+            else
+            {
+                Destroy(gameObject);
+            }
         }
     }
 }

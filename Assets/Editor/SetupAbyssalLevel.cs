@@ -64,6 +64,9 @@ namespace Abyssal.Editor
             // 11. Apply Maui Ocean Floor asset (8K photogrammetry texture & 3D scanned reef sections)
             SetupOceanFloorAsset.ExecuteSetup();
 
+            // 12. Setup Final Horror Cutscene (Crystal trigger, master controller, materials & audio)
+            SetupFinalCutscene.ExecuteSetup();
+
             // 13. Ensure Encounter & HUD managers
             SetupGameManagers();
 

@@ -44,8 +44,61 @@ namespace Abyssal.Player
         private float currentYaw   = 0f;
         private Vector2 smoothedDelta  = Vector2.zero;
         private Vector2 smoothVelocity = Vector2.zero;
+        private bool isControlsEnabled = true;
 
         private Vector3 localOffsetFromBody; // camera's local offset from playerBody, set once at Start
+
+        public bool IsControlsEnabled => isControlsEnabled;
+
+        /// <summary>
+        /// Enables or disables free mouse-look and flashlight input.
+        /// When disabled, mouse movement is ignored and cursor remains locked.
+        /// </summary>
+        public void SetControlsEnabled(bool enabled)
+        {
+            isControlsEnabled = enabled;
+            if (!enabled)
+            {
+                smoothedDelta = Vector2.zero;
+                smoothVelocity = Vector2.zero;
+                LockCursor(true);
+            }
+        }
+
+        /// <summary>
+        /// Smoothly orients the camera towards a target world position during scripted cutscenes.
+        /// </summary>
+        public void SmoothLookToward(Vector3 targetWorldPosition, float speed)
+        {
+            Vector3 dir = (targetWorldPosition - transform.position).normalized;
+            if (dir.sqrMagnitude > 0.0001f)
+            {
+                Quaternion targetRot = Quaternion.LookRotation(dir, Vector3.up);
+                transform.rotation = Quaternion.Slerp(transform.rotation, targetRot, speed * Time.deltaTime);
+
+                // Keep pitch and yaw trackers in sync
+                currentPitch = transform.localEulerAngles.x;
+                if (currentPitch > 180f) currentPitch -= 360f;
+                if (playerBody != null)
+                {
+                    currentYaw = playerBody.eulerAngles.y;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Smoothly rotates the camera towards a target world rotation during scripted cutscenes.
+        /// </summary>
+        public void SmoothRotateToward(Quaternion targetWorldRotation, float speed)
+        {
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetWorldRotation, speed * Time.deltaTime);
+            currentPitch = transform.localEulerAngles.x;
+            if (currentPitch > 180f) currentPitch -= 360f;
+            if (playerBody != null)
+            {
+                currentYaw = playerBody.eulerAngles.y;
+            }
+        }
 
         private void Awake()
         {
@@ -99,6 +152,7 @@ namespace Abyssal.Player
         {
             // Safety net: if the camera has somehow been unparented (Unity quirk with
             // prefab-instance stripped transforms), re-parent and restore position.
+            // Only re-parent if playerBody is still valid.
             if (playerBody != null && transform.parent != playerBody)
             {
                 transform.SetParent(playerBody, worldPositionStays: false);
@@ -108,6 +162,8 @@ namespace Abyssal.Player
 
         private void Update()
         {
+            if (!isControlsEnabled) return;
+
             HandleCursorLock();
             HandleMouseLook();
             HandleFlashlight();
@@ -115,6 +171,7 @@ namespace Abyssal.Player
 
         private void HandleMouseLook()
         {
+            if (!isControlsEnabled) return;
             if (Cursor.lockState != CursorLockMode.Locked) return;
 
             Vector2 raw = ReadMouseDelta();

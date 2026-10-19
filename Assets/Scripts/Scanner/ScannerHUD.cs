@@ -46,8 +46,21 @@ namespace Abyssal.Scanner
 
         private float nextPingTime = 0f;
         private float currentPingInterval = 2.0f;
+        private bool isMalfunctioning = false;
 
         public event Action OnPingPulse;
+
+        public bool IsMalfunctioning => isMalfunctioning;
+
+        /// <summary>
+        /// Triggers electromagnetic/biological malfunction during the final horror encounter.
+        /// </summary>
+        public void TriggerMalfunction()
+        {
+            isMalfunctioning = true;
+            StatusMessage = "CRITICAL: UNKNOWN BIOLOGICAL BIO-MASS DETECTED";
+            DirectionIndicator = "[!!! SIGNAL OVERLOAD !!!]";
+        }
 
         private void Awake()
         {
@@ -70,6 +83,15 @@ namespace Abyssal.Scanner
 
         private void Update()
         {
+            if (isMalfunctioning)
+            {
+                // Fluctuate wildly
+                CurrentDistance = Mathf.PingPong(Time.time * 75f, 180f) + UnityEngine.Random.Range(-5f, 5f);
+                DirectionIndicator = UnityEngine.Random.value > 0.5f ? "[!!! SIGNAL ANOMALY !!!]" : "[? ? ? ? ? ? ? ?]";
+                StatusMessage = "CRITICAL: LEVIATHAN BIO-MASS IMMINENT";
+                return;
+            }
+
             if (crystalTarget == null)
             {
                 ResolveCrystalTarget();

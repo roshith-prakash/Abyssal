@@ -56,9 +56,35 @@ namespace Abyssal.Player
 
         private Vector3 currentVelocity = Vector3.zero;
         private float   finKickTimer    = 0f;
+        private bool    isControlsEnabled = true;
 
         private static readonly int SpeedHash      = Animator.StringToHash("Speed");
         private static readonly int IsSwimmingHash = Animator.StringToHash("IsSwimming");
+
+        public bool IsControlsEnabled => isControlsEnabled;
+
+        /// <summary>
+        /// Enables or disables diver movement controls.
+        /// When disabled, velocity is zeroed immediately and all swimming input is ignored.
+        /// </summary>
+        public void SetControlsEnabled(bool enabled)
+        {
+            isControlsEnabled = enabled;
+            if (!enabled)
+            {
+                currentVelocity = Vector3.zero;
+                if (diverRigidbody != null)
+                {
+#if UNITY_6000_0_OR_NEWER
+                    diverRigidbody.linearVelocity = Vector3.zero;
+                    diverRigidbody.angularVelocity = Vector3.zero;
+#else
+                    diverRigidbody.velocity = Vector3.zero;
+                    diverRigidbody.angularVelocity = Vector3.zero;
+#endif
+                }
+            }
+        }
 
         // -----------------------------------------------------------------------
         private void Awake()
@@ -114,6 +140,12 @@ namespace Abyssal.Player
         // -----------------------------------------------------------------------
         private void HandleMovement()
         {
+            if (!isControlsEnabled)
+            {
+                currentVelocity = Vector3.zero;
+                return;
+            }
+
             Vector3 inputDir = ReadMovementInput(out bool isSprinting);
             float targetSpeed = isSprinting ? sprintSpeed : swimSpeed;
 
@@ -202,7 +234,7 @@ namespace Abyssal.Player
         // -----------------------------------------------------------------------
         private void HandleSwimmingSway()
         {
-            if (!enableFinKickSway || cameraTransform == null) return;
+            if (!enableFinKickSway || cameraTransform == null || !isControlsEnabled) return;
 
             bool isMoving = currentVelocity.magnitude > 0.3f;
             if (isMoving)

@@ -100,6 +100,11 @@ namespace Abyssal.UI
 
         private void HandleDiverDied()
         {
+            // If the final cinematic horror cutscene is playing, defer entirely to its SIGNAL LOST ending
+            if (FinalCutsceneController.Instance != null && FinalCutsceneController.Instance.IsCutsceneActive)
+            {
+                return;
+            }
             ShowGameOverScreen("CRITICAL INTEGRITY FAILURE — DIVER LOST TO THE ABYSS");
         }
 
@@ -119,6 +124,12 @@ namespace Abyssal.UI
 
         private void OnGUI()
         {
+            // If final cinematic is running, hide all gameplay HUD so the cinematic experience is uncompromised
+            if (FinalCutsceneController.Instance != null && FinalCutsceneController.Instance.IsCutsceneActive)
+            {
+                return;
+            }
+
             // Set base styling
             GUI.skin.label.fontSize = 14;
             GUI.skin.label.alignment = TextAnchor.MiddleLeft;

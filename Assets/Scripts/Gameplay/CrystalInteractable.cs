@@ -118,14 +118,18 @@ namespace Abyssal.Gameplay
 
             OnCrystalInteracted?.Invoke();
 
-            // Trigger the Leviathan encounter
-            if (LeviathanEncounter.Instance != null)
+            // Trigger the cinematic horror cutscene sequence
+            if (FinalCutsceneController.Instance != null)
+            {
+                FinalCutsceneController.Instance.StartCutscene();
+            }
+            else if (LeviathanEncounter.Instance != null)
             {
                 LeviathanEncounter.Instance.StartRevealSequence();
             }
             else
             {
-                Debug.LogWarning("[CrystalInteractable] LeviathanEncounter instance not found in scene!");
+                Debug.LogWarning("[CrystalInteractable] Cutscene controller instance not found in scene!");
             }
         }
 
