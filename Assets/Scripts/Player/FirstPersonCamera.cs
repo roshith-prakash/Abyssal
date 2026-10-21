@@ -40,6 +40,10 @@ namespace Abyssal.Player
         [Header("Flashlight")]
         [SerializeField] private bool startFlashlightOn = true;
 
+        [Header("First-Person Mesh Visibility")]
+        [Tooltip("If true, all renderers on the diver body are set to ShadowsOnly so they don't block the first-person camera while swimming, while still casting dynamic shadows on the seabed.")]
+        [SerializeField] private bool hideBodyInFirstPerson = true;
+
         private float currentPitch = 0f;
         private float currentYaw   = 0f;
         private Vector2 smoothedDelta  = Vector2.zero;
@@ -63,6 +67,31 @@ namespace Abyssal.Player
                 smoothVelocity = Vector2.zero;
                 LockCursor(true);
             }
+        }
+
+        /// <summary>
+        /// Forcibly re-parents the camera to the player body and restores first-person view.
+        /// Call this after any scripted cutscene that detached the camera, to guarantee
+        /// the player returns to first-person mode with no orphaned transform.
+        /// </summary>
+        public void ReattachToPlayer()
+        {
+            if (playerBody == null) return;
+
+            transform.SetParent(playerBody, worldPositionStays: false);
+            transform.localPosition = localOffsetFromBody;
+
+            // Re-sync pitch/yaw trackers so mouse-look continues from the correct angles
+            currentPitch = transform.localEulerAngles.x;
+            if (currentPitch > 180f) currentPitch -= 360f;
+            currentYaw = playerBody.eulerAngles.y;
+
+            smoothedDelta  = Vector2.zero;
+            smoothVelocity = Vector2.zero;
+
+            isControlsEnabled = true;
+            EnforceFirstPersonVisibility();
+            LockCursor(true);
         }
 
         /// <summary>
@@ -120,6 +149,8 @@ namespace Abyssal.Player
             {
                 transform.SetParent(playerBody, worldPositionStays: true);
             }
+
+            EnforceFirstPersonVisibility();
         }
 
         private void Start()
@@ -145,18 +176,50 @@ namespace Abyssal.Player
                 if (diverFlashlight.spotAngle < 60f) diverFlashlight.spotAngle = 68f;
             }
 
+            EnforceFirstPersonVisibility();
             LockCursor(true);
+        }
+
+        /// <summary>
+        /// Ensures all 3D mesh renderers on the diver's body are set to ShadowsOnly.
+        /// This prevents the scuba suit, oxygen tank, and flippers from blocking the
+        /// camera during horizontal swimming animations, while retaining realistic dynamic
+        /// shadows on the seafloor and rocks.
+        /// </summary>
+        public void EnforceFirstPersonVisibility()
+        {
+            if (!hideBodyInFirstPerson) return;
+
+            Transform body = playerBody != null ? playerBody : transform.parent;
+            if (body == null)
+            {
+                GameObject diver = GameObject.Find("Diver");
+                if (diver != null) body = diver.transform;
+            }
+
+            if (body != null)
+            {
+                Renderer[] renderers = body.GetComponentsInChildren<Renderer>(true);
+                foreach (Renderer r in renderers)
+                {
+                    // Never modify renderers attached directly to the camera (e.g. handheld tools)
+                    if (r.transform.IsChildOf(transform)) continue;
+
+                    // Never hide particle effects like MarineSnow
+                    if (r is ParticleSystemRenderer) continue;
+
+                    r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.ShadowsOnly;
+                }
+            }
         }
 
         private void LateUpdate()
         {
-            // During cutscene or when controls disabled, allow camera to be detached or manipulated freely
-            if (!isControlsEnabled) return;
-
             // Safety net: if the camera has somehow been unparented (Unity quirk with
             // prefab-instance stripped transforms), re-parent and restore position.
-            // Only re-parent if playerBody is still valid.
-            if (playerBody != null && transform.parent != playerBody)
+            // Only enforce re-parenting when player controls are active — cutscenes
+            // legitimately detach the camera and must not be overridden here.
+            if (playerBody != null && transform.parent != playerBody && isControlsEnabled)
             {
                 transform.SetParent(playerBody, worldPositionStays: false);
                 transform.localPosition = localOffsetFromBody;

@@ -287,10 +287,13 @@ namespace Abyssal.Player
                 float speed = new Vector2(currentVelocity.x, currentVelocity.z).magnitude;
                 finKickTimer += Time.deltaTime * finKickFrequency * (speed / swimSpeed);
                 float roll = Mathf.Cos(finKickTimer * 0.5f) * finKickRollAmount;
-                cameraTransform.localRotation = Quaternion.Euler(
-                    cameraTransform.localEulerAngles.x,
-                    cameraTransform.localEulerAngles.y,
-                    roll);
+                // Compose roll on top of existing pitch/yaw — never stomp the full quaternion.
+                // Reading localEulerAngles and feeding it back into Quaternion.Euler clobbers
+                // pitch that FirstPersonCamera just wrote, causing the third-person drift.
+                Quaternion pitchYaw = Quaternion.Euler(cameraTransform.localEulerAngles.x,
+                                                       cameraTransform.localEulerAngles.y, 0f);
+                Quaternion rollOnly = Quaternion.Euler(0f, 0f, roll);
+                cameraTransform.localRotation = pitchYaw * rollOnly;
             }
             else
             {

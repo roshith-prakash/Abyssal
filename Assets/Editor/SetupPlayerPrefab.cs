@@ -103,7 +103,7 @@ namespace Abyssal.Editor
                 PrefabUtility.UnpackPrefabInstance(diverGO, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
             }
 
-            // 5. Apply Custom Material to Player's rendered model
+            // 5. Apply Custom Material to Player's rendered model and configure ShadowsOnly for First-Person
             Renderer[] renderers = diverGO.GetComponentsInChildren<Renderer>(true);
             foreach (var r in renderers)
             {
@@ -112,6 +112,7 @@ namespace Abyssal.Editor
                     r.sharedMaterial = customMat;
                     Debug.Log($"[Abyssal] Assigned custom material {customMat.name} to {r.gameObject.name}");
                 }
+                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.ShadowsOnly;
             }
 
             // 6. Setup Rigidbody

@@ -84,12 +84,15 @@ namespace Abyssal.Editor
                 mainCam.fieldOfView = 75f;
             }
 
-            // Ensure the ENTIRE diver body (head, helmet, goggles, suit, arms, oxygen tank, flippers) is fully visible
+            // Set diver body renderers to ShadowsOnly so the player remains in pure first-person at all times,
+            // never seeing the scuba suit, oxygen tank, or flippers blocking the view while swimming,
+            // while preserving realistic dynamic shadows on the seafloor and cavern walls.
             Renderer[] allRenderers = diverGO.GetComponentsInChildren<Renderer>(true);
             foreach (Renderer r in allRenderers)
             {
+                if (r.transform.IsChildOf(cameraTrans)) continue;
                 r.enabled = true;
-                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On;
+                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.ShadowsOnly;
             }
 
             // Setup Diver Flashlight mounted at helmet/eye level
@@ -241,7 +244,36 @@ namespace Abyssal.Editor
             Debug.Log("[Abyssal] Successfully configured Diver First-Person Camera at eye level with visible arms!");
         }
 
-        [MenuItem("Abyssal/Attach Camera to Diver Eye Level (First-Person)", false, 0)]
+        [MenuItem("Abyssal/Configure True First-Person Diver (Hide Body Meshes)", false, 0)]
+        public static void ConfigureFirstPersonVisibility()
+        {
+            GameObject diverGO = GameObject.Find("Diver");
+            if (diverGO == null)
+            {
+                Debug.LogError("[Abyssal] Diver not found in scene!");
+                return;
+            }
+
+            Transform camTrans = Camera.main != null ? Camera.main.transform : diverGO.transform.Find("Main Camera");
+
+            Renderer[] renderers = diverGO.GetComponentsInChildren<Renderer>(true);
+            int count = 0;
+            foreach (Renderer r in renderers)
+            {
+                if (camTrans != null && r.transform.IsChildOf(camTrans)) continue;
+                Undo.RecordObject(r, "Set ShadowsOnly for First-Person");
+                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.ShadowsOnly;
+                EditorUtility.SetDirty(r);
+                count++;
+            }
+
+            var scene = EditorSceneManager.GetActiveScene();
+            EditorSceneManager.MarkSceneDirty(scene);
+            EditorSceneManager.SaveScene(scene);
+            Debug.Log($"[Abyssal] Configured {count} diver renderers to ShadowsOnly for 100% True First-Person gameplay!");
+        }
+
+        [MenuItem("Abyssal/Attach Camera to Diver Eye Level (First-Person)", false, 1)]
         public static void ExecuteSetup()
         {
             SwitchToNewDiver();
