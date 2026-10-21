@@ -8,12 +8,13 @@ using Abyssal.Gameplay;
 namespace Abyssal.UI
 {
     /// <summary>
-    /// Comprehensive HUD and UI manager for ABYSSAL.
-    /// Renders the scanner readout, health bar, interaction prompts,
-    /// dynamic objectives, and Win/Loss screens.
-    /// Uses high-performance, robust OnGUI with modern styling so it works
-    /// instantly with zero external Canvas dependencies, while exposing
-    /// events for Canvas components if preferred.
+    /// Intuitive, high-visibility Subnautica-inspired HUD for ABYSSAL.
+    /// Features:
+    /// - Iconic bottom-left circular biometric gauge cluster (Oxygen O2, Suit Integrity HP, Flashlight Power)
+    /// - High-contrast, enlarged legible dials (easily visible on all resolutions)
+    /// - Top-center Depth Meter (meters below surface) & Directional Compass/Sonar Bearing
+    /// - Center circular targeting reticle & contextual interaction prompt
+    /// - Optional diving helmet / visor frame vignette overlay for deep immersion
     /// </summary>
     public class GameHUDManager : MonoBehaviour
     {
@@ -21,25 +22,58 @@ namespace Abyssal.UI
         [SerializeField] private DiverHealth diverHealth;
         [SerializeField] private ScannerHUD scanner;
         [SerializeField] private CrystalInteractable crystal;
+        [SerializeField] private FirstPersonCamera firstPersonCamera;
+        [SerializeField] private Transform diverTransform;
+
+        [Header("HUD Customization")]
+        [Tooltip("Overall scaling factor for the HUD elements.")]
+        [Range(0.8f, 1.6f)]
+        [SerializeField] private float hudScale = 1.05f;
+
+        [Tooltip("Renders the authentic Subnautica-style diving mask / visor vignette around screen edges.")]
+        [SerializeField] private bool showHelmetVisor = true;
+
+        [Tooltip("Surface water elevation used to calculate depth.")]
+        [SerializeField] private float surfaceWaterElevation = 9.5f;
+
+        [Header("Oxygen System")]
+        [SerializeField] private bool enableOxygen = true;
+        [SerializeField] private float maxOxygen = 135f; // ~2.25 minutes of deep sea dive reserve
+        [SerializeField] private float currentOxygen = 135f;
+        [SerializeField] private float oxygenDepletionRate = 1.0f;
+        [SerializeField] private float oxygenRefillRate = 35.0f;
 
         [Header("Objective Display")]
-        [SerializeField] private string currentObjective = "Descend into the abyss and locate the anomalous signal.";
+        [SerializeField] private string currentObjective = "Descend into the canyon and recover the anomalous crystal.";
+
+        // Textures & Materials
+        private Texture2D circleBackTex;
+        private Texture2D reticleTex;
+        private Texture2D heartIconTex;
+        private Texture2D oxygenIconTex;
+        private Texture2D flashlightIconTex;
+        private Texture2D compassBracketTex;
+        private Texture2D visorFrameTex;
+
+        private Texture2D solidDarkTex;
+        private Texture2D solidPillTex;
+        private Material radialRingMaterial;
 
         private bool isGameOver = false;
         private string endScreenMessage = "";
 
-        private Texture2D barBackgroundTex;
-        private Texture2D barHealthTex;
-        private Texture2D darkBoxTex;
-        private Texture2D dangerBoxTex;
+        public float CurrentOxygen => currentOxygen;
+        public float MaxOxygen => maxOxygen;
 
         private void Awake()
         {
-            CreateTextures();
+            LoadHUDAssets();
+            CreateProceduralFallbacks();
         }
 
         private void Start()
         {
+            currentOxygen = maxOxygen;
             ResolveReferences();
 
             if (diverHealth != null)
@@ -51,25 +85,42 @@ namespace Abyssal.UI
             {
                 LeviathanEncounter.Instance.OnChaseStarted += () =>
                 {
-                    currentObjective = "CRITICAL ALERT: LEVIATHAN TERRITORY DETECTED!";
+                    currentObjective = "CRITICAL ALERT: PREDATOR LEVIATHAN TERRITORY!";
                 };
             }
         }
 
         private void Update()
         {
-            if (diverHealth == null || scanner == null)
+            if (diverHealth == null || scanner == null || firstPersonCamera == null || diverTransform == null)
             {
                 ResolveReferences();
             }
 
-            // Quick restart on game over
-            if (isGameOver)
+            // Oxygen depletion & surface replenishment
+            if (enableOxygen && !isGameOver && diverHealth != null && !diverHealth.IsDead)
             {
-                if (Input.GetKeyDown(KeyCode.R))
+                float diverY = diverTransform != null ? diverTransform.position.y : 0f;
+                bool isSurfaced = diverY >= (surfaceWaterElevation - 1.5f);
+
+                if (isSurfaced)
                 {
-                    RestartGame();
+                    currentOxygen = Mathf.Min(maxOxygen, currentOxygen + oxygenRefillRate * Time.deltaTime);
                 }
+                else
+                {
+                    currentOxygen = Mathf.Max(0f, currentOxygen - oxygenDepletionRate * Time.deltaTime);
+                    if (currentOxygen <= 0f)
+                    {
+                        diverHealth.TakeDamage(6f * Time.deltaTime, "Oxygen Depletion");
+                    }
+                }
+            }
+
+            // Game over restart shortcut
+            if (isGameOver && Input.GetKeyDown(KeyCode.R))
+            {
+                RestartGame();
             }
         }
 
@@ -78,34 +129,56 @@ namespace Abyssal.UI
             if (diverHealth == null) diverHealth = FindAnyObjectByType<DiverHealth>();
             if (scanner == null) scanner = FindAnyObjectByType<ScannerHUD>();
             if (crystal == null) crystal = FindAnyObjectByType<CrystalInteractable>();
+            if (firstPersonCamera == null) firstPersonCamera = FindAnyObjectByType<FirstPersonCamera>();
+            if (diverTransform == null)
+            {
+                GameObject diver = GameObject.Find("Diver");
+                if (diver != null) diverTransform = diver.transform;
+                else if (diverHealth != null) diverTransform = diverHealth.transform;
+            }
         }
 
-        private void CreateTextures()
+        private void LoadHUDAssets()
         {
-            barBackgroundTex = MakeTex(2, 2, new Color(0.08f, 0.12f, 0.18f, 0.85f));
-            barHealthTex = MakeTex(2, 2, new Color(0.15f, 0.75f, 0.95f, 0.95f));
-            darkBoxTex = MakeTex(2, 2, new Color(0.03f, 0.06f, 0.10f, 0.82f));
-            dangerBoxTex = MakeTex(2, 2, new Color(0.6f, 0.08f, 0.08f, 0.85f));
+            circleBackTex = Resources.Load<Texture2D>("UI/HUD_CircleBack");
+            reticleTex = Resources.Load<Texture2D>("UI/HUD_Reticle");
+            heartIconTex = Resources.Load<Texture2D>("UI/HUD_HeartIcon");
+            oxygenIconTex = Resources.Load<Texture2D>("UI/HUD_OxygenIcon");
+            flashlightIconTex = Resources.Load<Texture2D>("UI/HUD_FlashlightIcon");
+            compassBracketTex = Resources.Load<Texture2D>("UI/HUD_CompassBracket");
+            visorFrameTex = Resources.Load<Texture2D>("UI/DiverVisor_Frame");
+
+            Shader ringShader = Shader.Find("Abyssal/HUD_RadialRing");
+            if (ringShader != null)
+            {
+                radialRingMaterial = new Material(ringShader);
+            }
         }
 
-        private Texture2D MakeTex(int width, int height, Color col)
+        private void CreateProceduralFallbacks()
         {
-            Color[] pix = new Color[width * height];
+            solidDarkTex = MakeTex(2, 2, new Color(0.03f, 0.08f, 0.14f, 0.85f));
+            solidPillTex = MakeTex(2, 2, new Color(0.05f, 0.15f, 0.25f, 0.90f));
+            if (circleBackTex == null) circleBackTex = solidDarkTex;
+        }
+
+        private Texture2D MakeTex(int w, int h, Color col)
+        {
+            Color[] pix = new Color[w * h];
             for (int i = 0; i < pix.Length; i++) pix[i] = col;
-            Texture2D result = new Texture2D(width, height);
-            result.SetPixels(pix);
-            result.Apply();
-            return result;
+            Texture2D tex = new Texture2D(w, h);
+            tex.SetPixels(pix);
+            tex.Apply();
+            return tex;
         }
 
         private void HandleDiverDied()
         {
-            // If the final cinematic horror cutscene is playing, defer entirely to its SIGNAL LOST ending
             if (FinalCutsceneController.Instance != null && FinalCutsceneController.Instance.IsCutsceneActive)
             {
                 return;
             }
-            ShowGameOverScreen("CRITICAL INTEGRITY FAILURE — DIVER LOST TO THE ABYSS");
+            ShowGameOverScreen("SUIT COMPROMISED — DIVER LOST TO THE ABYSS");
         }
 
         public void ShowGameOverScreen(string message)
@@ -124,145 +197,347 @@ namespace Abyssal.UI
 
         private void OnGUI()
         {
-            // If final cinematic is running, hide all gameplay HUD so the cinematic experience is uncompromised
+            // Suppress HUD during scripted cutscenes for cinematic immersion
             if (FinalCutsceneController.Instance != null && FinalCutsceneController.Instance.IsCutsceneActive)
             {
                 return;
             }
 
-            // Set base styling
-            GUI.skin.label.fontSize = 14;
-            GUI.skin.label.alignment = TextAnchor.MiddleLeft;
-
             float screenW = Screen.width;
             float screenH = Screen.height;
 
-            // 1. GAME OVER OVERLAY (Cinematic scene: only ends if diver is lost/consumed)
             if (isGameOver)
             {
-                DrawEndScreen(screenW, screenH);
+                DrawGameOverScreen(screenW, screenH);
                 return;
             }
 
-            // 2. TOP BANNER: Title & Current Objective
-            Rect topBox = new Rect(screenW * 0.5f - 240f, 15f, 480f, 52f);
-            GUI.DrawTexture(topBox, darkBoxTex);
-
-            GUIStyle titleStyle = new GUIStyle(GUI.skin.label)
+            // 1. DIVING VISOR OVERLAY (Authentic Subnautica helmet border)
+            if (showHelmetVisor && visorFrameTex != null)
             {
-                fontSize = 12,
+                GUI.color = new Color(1f, 1f, 1f, 0.92f);
+                GUI.DrawTexture(new Rect(0, 0, screenW, screenH), visorFrameTex);
+                GUI.color = Color.white;
+            }
+
+            // 2. RETICLE & INTERACTION PROMPT (Center)
+            DrawCenterReticle(screenW, screenH);
+
+            // 3. TOP CENTER: SUBNAUTICA DEPTH & DIRECTIONAL SONAR HEADING
+            DrawTopDepthAndSonar(screenW, screenH);
+
+            // 4. TOP LEFT: MISSION OBJECTIVE BADGE
+            DrawObjectivePill();
+
+            // 5. BOTTOM LEFT: THE ICONIC CIRCULAR BIOMETRIC CLUSTER (O2, HP, FLASHLIGHT)
+            DrawSubnauticaBiometricCluster(screenH);
+
+            // 6. BOTTOM RIGHT: CONTROLS GUIDE
+            DrawControlsBadge(screenW, screenH);
+        }
+
+        // ==========================================
+        // SUBNAUTICA BIOMETRIC CLUSTER (Bottom Left)
+        // ==========================================
+        private void DrawSubnauticaBiometricCluster(float screenH)
+        {
+            float scale = hudScale;
+            float clusterBaseX = 40f * scale;
+            float clusterBaseY = screenH - (195f * scale);
+
+            // --- A. MAIN DIAL: OXYGEN (O2) ---
+            float o2DialSize = 145f * scale;
+            Rect o2Rect = new Rect(clusterBaseX + (35f * scale), clusterBaseY - (10f * scale), o2DialSize, o2DialSize);
+
+            // Translucent glass circle back
+            GUI.DrawTexture(o2Rect, circleBackTex);
+
+            float o2Percent = Mathf.Clamp01(currentOxygen / maxOxygen);
+            bool isLowO2 = currentOxygen < 30f;
+            Color o2FillColor = isLowO2
+                ? Color.Lerp(new Color(1f, 0.2f, 0.1f), new Color(1f, 0.7f, 0.1f), Mathf.PingPong(Time.time * 4f, 1f))
+                : new Color(0.0f, 0.88f, 1.0f, 1.0f); // Electric Cyan
+
+            DrawRadialRing(o2Rect, o2Percent, o2FillColor, 0.38f, 0.48f);
+
+            // Center icon & readout
+            if (oxygenIconTex != null)
+            {
+                float iconSize = 34f * scale;
+                GUI.color = o2FillColor;
+                GUI.DrawTexture(new Rect(o2Rect.center.x - iconSize * 0.5f, o2Rect.y + (20f * scale), iconSize, iconSize), oxygenIconTex);
+                GUI.color = Color.white;
+            }
+
+            GUIStyle o2LabelStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = Mathf.RoundToInt(15 * scale),
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleCenter,
-                normal = { textColor = new Color(0.5f, 0.8f, 1.0f) }
+                normal = { textColor = new Color(0.6f, 0.9f, 1.0f, 0.85f) }
             };
-            GUI.Label(new Rect(topBox.x, topBox.y + 4f, topBox.width, 18f), "ABYSSAL — DEEP SEA RESEARCH PROTOCOL", titleStyle);
+            GUI.Label(new Rect(o2Rect.x, o2Rect.y + (54f * scale), o2Rect.width, 18f * scale), "O₂", o2LabelStyle);
 
-            GUIStyle objStyle = new GUIStyle(GUI.skin.label)
+            GUIStyle o2NumberStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = 13,
+                fontSize = Mathf.RoundToInt(28 * scale),
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = isLowO2 ? Color.red : Color.white }
+            };
+            GUI.Label(new Rect(o2Rect.x, o2Rect.y + (70f * scale), o2Rect.width, 36f * scale), $"{Mathf.CeilToInt(currentOxygen)}", o2NumberStyle);
+
+            // --- B. SATELLITE DIAL 1: SUIT INTEGRITY / HEALTH (Top-Left of O2) ---
+            float hpDialSize = 85f * scale;
+            Rect hpRect = new Rect(clusterBaseX - (15f * scale), clusterBaseY - (65f * scale), hpDialSize, hpDialSize);
+
+            GUI.DrawTexture(hpRect, circleBackTex);
+
+            float currentHp = diverHealth != null ? diverHealth.CurrentHealth : 100f;
+            float maxHp = diverHealth != null ? diverHealth.MaxHealth : 100f;
+            float hpPercent = Mathf.Clamp01(currentHp / maxHp);
+
+            Color hpColor;
+            if (hpPercent > 0.6f) hpColor = new Color(0.0f, 0.92f, 0.45f); // Vibrant Emerald Green
+            else if (hpPercent > 0.3f) hpColor = new Color(1.0f, 0.85f, 0.1f); // Warning Yellow
+            else hpColor = new Color(1.0f, 0.15f, 0.15f); // Critical Red
+
+            DrawRadialRing(hpRect, hpPercent, hpColor, 0.37f, 0.47f);
+
+            if (heartIconTex != null)
+            {
+                float iconSize = 24f * scale;
+                GUI.color = hpColor;
+                GUI.DrawTexture(new Rect(hpRect.center.x - iconSize * 0.5f, hpRect.y + (14f * scale), iconSize, iconSize), heartIconTex);
+                GUI.color = Color.white;
+            }
+
+            GUIStyle hpNumberStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = Mathf.RoundToInt(18 * scale),
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleCenter,
                 normal = { textColor = Color.white }
             };
-            GUI.Label(new Rect(topBox.x, topBox.y + 24f, topBox.width, 22f), currentObjective, objStyle);
+            GUI.Label(new Rect(hpRect.x, hpRect.y + (38f * scale), hpRect.width, 24f * scale), $"{Mathf.RoundToInt(hpPercent * 100f)}%", hpNumberStyle);
 
-            // 3. SCANNER DISPLAY (Top Center / Under Objective)
-            if (scanner != null)
+            // --- C. SATELLITE DIAL 2: FLASHLIGHT / POWER (Bottom-Left of O2) ---
+            float lightDialSize = 75f * scale;
+            Rect lightRect = new Rect(clusterBaseX - (20f * scale), clusterBaseY + (45f * scale), lightDialSize, lightDialSize);
+
+            GUI.DrawTexture(lightRect, circleBackTex);
+
+            bool isLightOn = firstPersonCamera != null && firstPersonCamera.IsFlashlightOn;
+            Color lightColor = isLightOn
+                ? new Color(1.0f, 0.88f, 0.35f, 1.0f) // Warm Golden Glow
+                : new Color(0.35f, 0.45f, 0.55f, 0.6f); // Dim Idle
+
+            DrawRadialRing(lightRect, isLightOn ? 1.0f : 0.20f, lightColor, 0.36f, 0.46f);
+
+            if (flashlightIconTex != null)
             {
-                Rect scannerBox = new Rect(screenW * 0.5f - 210f, 74f, 420f, 62f);
-                GUI.DrawTexture(scannerBox, darkBoxTex);
-
-                // Ping pulse indicator
-                Color pulseCol = Color.Lerp(new Color(0.2f, 0.9f, 1.0f), Color.white, scanner.PingProgress);
-                GUIStyle pulseStyle = new GUIStyle(GUI.skin.label)
-                {
-                    fontSize = 13,
-                    fontStyle = FontStyle.Bold,
-                    alignment = TextAnchor.MiddleLeft,
-                    normal = { textColor = pulseCol }
-                };
-                GUI.Label(new Rect(scannerBox.x + 15f, scannerBox.y + 8f, 240f, 22f), $"SCANNER: {scanner.DirectionIndicator}", pulseStyle);
-
-                GUIStyle distStyle = new GUIStyle(GUI.skin.label)
-                {
-                    fontSize = 13,
-                    fontStyle = FontStyle.Bold,
-                    alignment = TextAnchor.MiddleRight,
-                    normal = { textColor = new Color(0.4f, 0.95f, 0.6f) }
-                };
-                GUI.Label(new Rect(scannerBox.x + 230f, scannerBox.y + 8f, 175f, 22f), $"DIST: {scanner.CurrentDistance:F0}m", distStyle);
-
-                GUIStyle statusStyle = new GUIStyle(GUI.skin.label)
-                {
-                    fontSize = 11,
-                    alignment = TextAnchor.MiddleCenter,
-                    normal = { textColor = new Color(0.75f, 0.85f, 0.95f) }
-                };
-                GUI.Label(new Rect(scannerBox.x, scannerBox.y + 34f, scannerBox.width, 20f), scanner.StatusMessage, statusStyle);
+                float iconSize = 24f * scale;
+                GUI.color = lightColor;
+                GUI.DrawTexture(new Rect(lightRect.center.x - iconSize * 0.5f, lightRect.y + (12f * scale), iconSize, iconSize), flashlightIconTex);
+                GUI.color = Color.white;
             }
 
-            // 4. HEALTH BAR (Bottom Left)
-            if (diverHealth != null)
+            GUIStyle lightTextStyle = new GUIStyle(GUI.skin.label)
             {
-                Rect hpContainer = new Rect(25f, screenH - 65f, 240f, 40f);
-                GUI.DrawTexture(hpContainer, darkBoxTex);
-
-                GUIStyle hpLabelStyle = new GUIStyle(GUI.skin.label)
-                {
-                    fontSize = 11,
-                    fontStyle = FontStyle.Bold,
-                    normal = { textColor = new Color(0.7f, 0.9f, 1.0f) }
-                };
-                GUI.Label(new Rect(hpContainer.x + 10f, hpContainer.y + 3f, 200f, 16f), $"SUIT INTEGRITY: {diverHealth.CurrentHealth:F0}/{diverHealth.MaxHealth:F0} HP", hpLabelStyle);
-
-                // Bar
-                Rect hpBarBg = new Rect(hpContainer.x + 10f, hpContainer.y + 21f, 220f, 12f);
-                GUI.DrawTexture(hpBarBg, barBackgroundTex);
-
-                float hpPercent = Mathf.Clamp01(diverHealth.CurrentHealth / diverHealth.MaxHealth);
-                Rect hpBarFill = new Rect(hpBarBg.x, hpBarBg.y, hpBarBg.width * hpPercent, hpBarBg.height);
-                GUI.DrawTexture(hpBarFill, barHealthTex);
-            }
-
-            // 5. INTERACTION PROMPT (Center Screen)
-            if (crystal != null && crystal.IsPlayerInRange)
-            {
-                Rect promptBox = new Rect(screenW * 0.5f - 160f, screenH * 0.5f + 40f, 320f, 36f);
-                GUI.DrawTexture(promptBox, darkBoxTex);
-
-                GUIStyle pStyle = new GUIStyle(GUI.skin.label)
-                {
-                    fontSize = 14,
-                    fontStyle = FontStyle.Bold,
-                    alignment = TextAnchor.MiddleCenter,
-                    normal = { textColor = new Color(0.3f, 1.0f, 0.9f) }
-                };
-                GUI.Label(promptBox, crystal.PromptText, pStyle);
-            }
-
-            // 6. CONTROLS HELPER (Bottom Right)
-            Rect controlsBox = new Rect(screenW - 240f, screenH - 65f, 215f, 40f);
-            GUI.DrawTexture(controlsBox, darkBoxTex);
-            GUIStyle ctrlStyle = new GUIStyle(GUI.skin.label)
-            {
-                fontSize = 10,
+                fontSize = Mathf.RoundToInt(13 * scale),
+                fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleCenter,
-                normal = { textColor = new Color(0.6f, 0.7f, 0.8f) }
+                normal = { textColor = lightColor }
             };
-            GUI.Label(controlsBox, "WASD: Swim | Space/C: Ascend/Descend\nShift: Sprint | F: Flashlight | E: Interact", ctrlStyle);
+            GUI.Label(new Rect(lightRect.x, lightRect.y + (36f * scale), lightRect.width, 20f * scale), isLightOn ? "[F] ON" : "[F] OFF", lightTextStyle);
         }
 
-        private void DrawEndScreen(float screenW, float screenH)
+        // ==========================================
+        // TOP CENTER: DEPTH & SONAR NAVIGATION
+        // ==========================================
+        private void DrawTopDepthAndSonar(float screenW, float screenH)
         {
-            // Dimmed background
-            GUI.DrawTexture(new Rect(0, 0, screenW, screenH), dangerBoxTex);
+            float scale = hudScale;
+            float centerX = screenW * 0.5f;
 
-            Rect centerBox = new Rect(screenW * 0.5f - 300f, screenH * 0.5f - 110f, 600f, 220f);
-            GUI.DrawTexture(centerBox, darkBoxTex);
+            // 1. Calculate depth below water surface
+            float diverY = diverTransform != null ? diverTransform.position.y : 0f;
+            float depthMeters = Mathf.Max(0f, surfaceWaterElevation - diverY);
+
+            // Backdrop box for high-contrast visibility
+            float depthBoxW = 240f * scale;
+            float depthBoxH = 50f * scale;
+            Rect depthBoxRect = new Rect(centerX - depthBoxW * 0.5f, 18f * scale, depthBoxW, depthBoxH);
+            GUI.DrawTexture(depthBoxRect, solidPillTex);
+
+            GUIStyle depthStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = Mathf.RoundToInt(26 * scale),
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = new Color(0.15f, 0.95f, 1.0f) }
+            };
+            GUI.Label(depthBoxRect, $"{Mathf.RoundToInt(depthMeters)} m", depthStyle);
+
+            // 2. Subnautica curved compass bracket
+            if (compassBracketTex != null)
+            {
+                float bracketW = 280f * scale;
+                float bracketH = 46f * scale;
+                Rect bracketRect = new Rect(centerX - bracketW * 0.5f, depthBoxRect.yMax - (8f * scale), bracketW, bracketH);
+                GUI.DrawTexture(bracketRect, compassBracketTex);
+            }
+
+            // 3. Directional Sonar Heading & Distance to Ancient Crystal
+            if (scanner != null)
+            {
+                float sonarBoxW = 340f * scale;
+                float sonarBoxH = 30f * scale;
+                Rect sonarBoxRect = new Rect(centerX - sonarBoxW * 0.5f, depthBoxRect.yMax + (32f * scale), sonarBoxW, sonarBoxH);
+                GUI.DrawTexture(sonarBoxRect, solidDarkTex);
+
+                Color pulseColor = Color.Lerp(new Color(0.2f, 0.85f, 1.0f), Color.white, scanner.PingProgress);
+                GUIStyle sonarStyle = new GUIStyle(GUI.skin.label)
+                {
+                    fontSize = Mathf.RoundToInt(14 * scale),
+                    fontStyle = FontStyle.Bold,
+                    alignment = TextAnchor.MiddleCenter,
+                    normal = { textColor = pulseColor }
+                };
+
+                string beaconText = scanner.IsMalfunctioning
+                    ? scanner.DirectionIndicator
+                    : $"{scanner.DirectionIndicator}  |  {scanner.CurrentDistance:F0}m";
+
+                GUI.Label(sonarBoxRect, beaconText, sonarStyle);
+            }
+        }
+
+        // ==========================================
+        // CENTER RETICLE & CONTEXT PROMPT
+        // ==========================================
+        private void DrawCenterReticle(float screenW, float screenH)
+        {
+            float scale = hudScale;
+            float centerX = screenW * 0.5f;
+            float centerY = screenH * 0.5f;
+
+            bool isNearCrystal = crystal != null && crystal.IsPlayerInRange;
+
+            // Reticle circle
+            if (reticleTex != null)
+            {
+                float rSize = 34f * scale;
+                Rect rRect = new Rect(centerX - rSize * 0.5f, centerY - rSize * 0.5f, rSize, rSize);
+
+                GUI.color = isNearCrystal ? new Color(0.1f, 1f, 0.85f, 1.0f) : new Color(1f, 1f, 1f, 0.75f);
+                GUI.DrawTexture(rRect, reticleTex);
+                GUI.color = Color.white;
+            }
+
+            // Interactive prompt pill
+            if (isNearCrystal)
+            {
+                float promptW = 340f * scale;
+                float promptH = 40f * scale;
+                Rect promptRect = new Rect(centerX - promptW * 0.5f, centerY + (35f * scale), promptW, promptH);
+
+                GUI.DrawTexture(promptRect, solidPillTex);
+
+                GUIStyle promptStyle = new GUIStyle(GUI.skin.label)
+                {
+                    fontSize = Mathf.RoundToInt(16 * scale),
+                    fontStyle = FontStyle.Bold,
+                    alignment = TextAnchor.MiddleCenter,
+                    normal = { textColor = new Color(0.2f, 1.0f, 0.9f) }
+                };
+                GUI.Label(promptRect, crystal.PromptText, promptStyle);
+            }
+        }
+
+        // ==========================================
+        // MISSION OBJECTIVE BADGE (Top Left)
+        // ==========================================
+        private void DrawObjectivePill()
+        {
+            float scale = hudScale;
+            float boxW = 420f * scale;
+            float boxH = 40f * scale;
+            Rect objRect = new Rect(30f * scale, 25f * scale, boxW, boxH);
+
+            GUI.DrawTexture(objRect, solidDarkTex);
+
+            GUIStyle objHeaderStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = Mathf.RoundToInt(10 * scale),
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.UpperLeft,
+                normal = { textColor = new Color(0.2f, 0.8f, 1.0f) }
+            };
+            GUI.Label(new Rect(objRect.x + 12f * scale, objRect.y + 3f * scale, objRect.width - 24f * scale, 14f * scale), "PRIMARY DIRECTIVE", objHeaderStyle);
+
+            GUIStyle objTextStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = Mathf.RoundToInt(13 * scale),
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.LowerLeft,
+                normal = { textColor = Color.white }
+            };
+            GUI.Label(new Rect(objRect.x + 12f * scale, objRect.y + 16f * scale, objRect.width - 24f * scale, 20f * scale), currentObjective, objTextStyle);
+        }
+
+        // ==========================================
+        // CONTROLS GUIDE (Bottom Right)
+        // ==========================================
+        private void DrawControlsBadge(float screenW, float screenH)
+        {
+            float scale = hudScale;
+            float boxW = 280f * scale;
+            float boxH = 34f * scale;
+            Rect box = new Rect(screenW - boxW - (30f * scale), screenH - boxH - (25f * scale), boxW, boxH);
+
+            GUI.DrawTexture(box, solidDarkTex);
+
+            GUIStyle style = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = Mathf.RoundToInt(11 * scale),
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = new Color(0.6f, 0.75f, 0.88f) }
+            };
+            GUI.Label(box, "WASD: Swim  |  Space: Ascend  |  C: Descend", style);
+        }
+
+        // ==========================================
+        // SHADER RADIAL GAUGE HELPER
+        // ==========================================
+        private void DrawRadialRing(Rect rect, float fillPercent, Color fillColor, float innerRad = 0.37f, float outerRad = 0.47f)
+        {
+            if (radialRingMaterial != null)
+            {
+                radialRingMaterial.SetColor("_Color", fillColor);
+                radialRingMaterial.SetColor("_BgColor", new Color(fillColor.r * 0.15f, fillColor.g * 0.15f, fillColor.b * 0.15f, 0.28f));
+                radialRingMaterial.SetFloat("_Fill", Mathf.Clamp01(fillPercent));
+                radialRingMaterial.SetFloat("_InnerRadius", innerRad);
+                radialRingMaterial.SetFloat("_OuterRadius", outerRad);
+
+                Graphics.DrawTexture(rect, Texture2D.whiteTexture, radialRingMaterial);
+            }
+        }
+
+        // ==========================================
+        // GAME OVER SCREEN
+        // ==========================================
+        private void DrawGameOverScreen(float screenW, float screenH)
+        {
+            Texture2D redTint = MakeTex(2, 2, new Color(0.4f, 0.04f, 0.04f, 0.85f));
+            GUI.DrawTexture(new Rect(0, 0, screenW, screenH), redTint);
+
+            Rect centerBox = new Rect(screenW * 0.5f - 280f, screenH * 0.5f - 110f, 560f, 220f);
+            GUI.DrawTexture(centerBox, solidDarkTex);
 
             GUIStyle mainTitleStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = 24,
+                fontSize = 26,
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleCenter,
                 normal = { textColor = new Color(1f, 0.25f, 0.25f) }
@@ -271,13 +546,13 @@ namespace Abyssal.UI
 
             GUIStyle subStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = 14,
+                fontSize = 15,
                 alignment = TextAnchor.MiddleCenter,
                 normal = { textColor = new Color(0.9f, 0.9f, 0.9f) }
             };
-            GUI.Label(new Rect(centerBox.x + 20f, centerBox.y + 65f, centerBox.width - 40f, 40f), endScreenMessage, subStyle);
+            GUI.Label(new Rect(centerBox.x + 20f, centerBox.y + 70f, centerBox.width - 40f, 40f), endScreenMessage, subStyle);
 
-            if (GUI.Button(new Rect(centerBox.x + 200f, centerBox.y + 130f, 200f, 45f), "RETRY EXPEDITION [R]"))
+            if (GUI.Button(new Rect(centerBox.x + 180f, centerBox.y + 135f, 200f, 48f), "RETRY EXPEDITION [R]"))
             {
                 RestartGame();
             }

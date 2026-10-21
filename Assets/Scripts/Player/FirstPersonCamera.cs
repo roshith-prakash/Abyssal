@@ -53,6 +53,8 @@ namespace Abyssal.Player
         private Vector3 localOffsetFromBody; // camera's local offset from playerBody, set once at Start
 
         public bool IsControlsEnabled => isControlsEnabled;
+        public bool IsFlashlightOn => diverFlashlight != null && diverFlashlight.enabled;
+        public Light DiverFlashlight => diverFlashlight;
 
         /// <summary>
         /// Enables or disables free mouse-look and flashlight input.
