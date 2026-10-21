@@ -10,6 +10,7 @@ namespace Abyssal.UI
     /// <summary>
     /// Intuitive, high-visibility Subnautica-inspired HUD for ABYSSAL.
     /// Features:
+    /// - Interactive Mission Briefing card on start before diver control is granted
     /// - Iconic bottom-left circular biometric gauge cluster (Oxygen O2, Suit Integrity HP, Flashlight Power)
     /// - High-contrast, enlarged legible dials (easily visible on all resolutions)
     /// - Top-center Depth Meter (meters below surface) & Directional Compass/Sonar Bearing
@@ -20,10 +21,17 @@ namespace Abyssal.UI
     {
         [Header("State References")]
         [SerializeField] private DiverHealth diverHealth;
+        [SerializeField] private DiverMovement diverMovement;
         [SerializeField] private ScannerHUD scanner;
         [SerializeField] private CrystalInteractable crystal;
         [SerializeField] private FirstPersonCamera firstPersonCamera;
         [SerializeField] private Transform diverTransform;
+
+        [Header("Mission Briefing Screen")]
+        [Tooltip("Displays the story mission briefing on game start before diver control is granted.")]
+        [SerializeField] private bool showMissionBriefingOnStart = true;
+        private bool isMissionBriefingActive = false;
+        private float briefingStartTime = 0f;
 
         [Header("HUD Customization")]
         [Tooltip("Overall scaling factor for the HUD elements.")]
@@ -47,6 +55,7 @@ namespace Abyssal.UI
         [SerializeField] private string currentObjective = "Descend into the canyon and recover the anomalous crystal.";
 
         // Textures & Materials
+        private Texture2D briefingCardTex;
         private Texture2D circleBackTex;
         private Texture2D reticleTex;
         private Texture2D heartIconTex;
@@ -57,6 +66,7 @@ namespace Abyssal.UI
 
         private Texture2D solidDarkTex;
         private Texture2D solidPillTex;
+        private Texture2D backdropDimTex;
         private Material radialRingMaterial;
 
         private bool isGameOver = false;
@@ -64,6 +74,7 @@ namespace Abyssal.UI
 
         public float CurrentOxygen => currentOxygen;
         public float MaxOxygen => maxOxygen;
+        public bool IsMissionBriefingActive => isMissionBriefingActive;
 
         private void Awake()
         {
@@ -88,13 +99,38 @@ namespace Abyssal.UI
                     currentObjective = "CRITICAL ALERT: PREDATOR LEVIATHAN TERRITORY!";
                 };
             }
+
+            // Start with mission briefing displayed and diver controls paused
+            if (showMissionBriefingOnStart)
+            {
+                isMissionBriefingActive = true;
+                briefingStartTime = Time.time;
+                SetDiverControlEnabled(false);
+            }
         }
 
         private void Update()
         {
-            if (diverHealth == null || scanner == null || firstPersonCamera == null || diverTransform == null)
+            if (diverHealth == null || scanner == null || firstPersonCamera == null || diverMovement == null || diverTransform == null)
             {
                 ResolveReferences();
+            }
+
+            // If mission briefing is active, await player confirmation to begin the descent
+            if (isMissionBriefingActive)
+            {
+                // Ensure controls stay locked while briefing is visible
+                SetDiverControlEnabled(false);
+
+                // Allow dismissing with Space, Enter, E, LMB, or any key after a short debounce
+                if (Time.time - briefingStartTime > 0.35f)
+                {
+                    if (Input.anyKeyDown || Input.GetMouseButtonDown(0))
+                    {
+                        DismissMissionBriefing();
+                    }
+                }
+                return; // Do not deplete oxygen or update gameplay timers while reading briefing!
             }
 
             // Oxygen depletion & surface replenishment
@@ -127,6 +163,7 @@ namespace Abyssal.UI
         private void ResolveReferences()
         {
             if (diverHealth == null) diverHealth = FindAnyObjectByType<DiverHealth>();
+            if (diverMovement == null) diverMovement = FindAnyObjectByType<DiverMovement>();
             if (scanner == null) scanner = FindAnyObjectByType<ScannerHUD>();
             if (crystal == null) crystal = FindAnyObjectByType<CrystalInteractable>();
             if (firstPersonCamera == null) firstPersonCamera = FindAnyObjectByType<FirstPersonCamera>();
@@ -138,8 +175,38 @@ namespace Abyssal.UI
             }
         }
 
+        public void SetDiverControlEnabled(bool enabled)
+        {
+            if (diverMovement == null || firstPersonCamera == null)
+            {
+                ResolveReferences();
+            }
+
+            diverMovement?.SetControlsEnabled(enabled);
+            firstPersonCamera?.SetControlsEnabled(enabled);
+
+            if (enabled)
+            {
+                Cursor.lockState = CursorLockMode.Locked;
+                Cursor.visible = false;
+            }
+            else
+            {
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+            }
+        }
+
+        public void DismissMissionBriefing()
+        {
+            isMissionBriefingActive = false;
+            SetDiverControlEnabled(true);
+            Debug.Log("[GameHUDManager] Mission Briefing dismissed. Diver controls fully activated!");
+        }
+
         private void LoadHUDAssets()
         {
+            briefingCardTex = Resources.Load<Texture2D>("UI/HUD_BriefingCard");
             circleBackTex = Resources.Load<Texture2D>("UI/HUD_CircleBack");
             reticleTex = Resources.Load<Texture2D>("UI/HUD_Reticle");
             heartIconTex = Resources.Load<Texture2D>("UI/HUD_HeartIcon");
@@ -159,7 +226,9 @@ namespace Abyssal.UI
         {
             solidDarkTex = MakeTex(2, 2, new Color(0.03f, 0.08f, 0.14f, 0.85f));
             solidPillTex = MakeTex(2, 2, new Color(0.05f, 0.15f, 0.25f, 0.90f));
+            backdropDimTex = MakeTex(2, 2, new Color(0.01f, 0.03f, 0.06f, 0.88f));
             if (circleBackTex == null) circleBackTex = solidDarkTex;
+            if (briefingCardTex == null) briefingCardTex = solidDarkTex;
         }
 
         private Texture2D MakeTex(int w, int h, Color col)
@@ -206,13 +275,21 @@ namespace Abyssal.UI
             float screenW = Screen.width;
             float screenH = Screen.height;
 
+            // 0. MISSION BRIEFING SCREEN (Shown at start before diver is controllable)
+            if (isMissionBriefingActive)
+            {
+                DrawMissionBriefingScreen(screenW, screenH);
+                return;
+            }
+
+            // 1. GAME OVER OVERLAY
             if (isGameOver)
             {
                 DrawGameOverScreen(screenW, screenH);
                 return;
             }
 
-            // 1. DIVING VISOR OVERLAY (Authentic Subnautica helmet border)
+            // 2. DIVING VISOR OVERLAY (Authentic Subnautica helmet border)
             if (showHelmetVisor && visorFrameTex != null)
             {
                 GUI.color = new Color(1f, 1f, 1f, 0.92f);
@@ -220,20 +297,107 @@ namespace Abyssal.UI
                 GUI.color = Color.white;
             }
 
-            // 2. RETICLE & INTERACTION PROMPT (Center)
+            // 3. RETICLE & INTERACTION PROMPT (Center)
             DrawCenterReticle(screenW, screenH);
 
-            // 3. TOP CENTER: SUBNAUTICA DEPTH & DIRECTIONAL SONAR HEADING
+            // 4. TOP CENTER: SUBNAUTICA DEPTH & DIRECTIONAL SONAR HEADING
             DrawTopDepthAndSonar(screenW, screenH);
 
-            // 4. TOP LEFT: MISSION OBJECTIVE BADGE
+            // 5. TOP LEFT: MISSION OBJECTIVE BADGE
             DrawObjectivePill();
 
-            // 5. BOTTOM LEFT: THE ICONIC CIRCULAR BIOMETRIC CLUSTER (O2, HP, FLASHLIGHT)
+            // 6. BOTTOM LEFT: THE ICONIC CIRCULAR BIOMETRIC CLUSTER (O2, HP, FLASHLIGHT)
             DrawSubnauticaBiometricCluster(screenH);
 
-            // 6. BOTTOM RIGHT: CONTROLS GUIDE
+            // 7. BOTTOM RIGHT: CONTROLS GUIDE
             DrawControlsBadge(screenW, screenH);
+        }
+
+        // ==========================================
+        // MISSION BRIEFING SCREEN (Intro Story Card)
+        // ==========================================
+        private void DrawMissionBriefingScreen(float screenW, float screenH)
+        {
+            // Dimmed underwater backdrop
+            GUI.DrawTexture(new Rect(0, 0, screenW, screenH), backdropDimTex);
+
+            float cardW = Mathf.Min(840f, screenW * 0.92f);
+            float cardH = Mathf.Min(430f, screenH * 0.82f);
+            Rect cardRect = new Rect(screenW * 0.5f - cardW * 0.5f, screenH * 0.5f - cardH * 0.5f, cardW, cardH);
+
+            // Draw Card background texture
+            GUI.DrawTexture(cardRect, briefingCardTex);
+
+            // 1. "MISSION BRIEFING" Header
+            GUIStyle tagStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 13,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = new Color(0.0f, 0.88f, 1.0f) }
+            };
+            GUI.Label(new Rect(cardRect.x, cardRect.y + 36f, cardRect.width, 22f), "MISSION BRIEFING", tagStyle);
+
+            // 2. "LOST IN THE ABYSS" Title
+            GUIStyle titleStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 32,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = Color.white }
+            };
+            GUI.Label(new Rect(cardRect.x, cardRect.y + 64f, cardRect.width, 45f), "LOST IN THE ABYSS", titleStyle);
+
+            // 3. Body text
+            GUIStyle bodyStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 17,
+                fontStyle = FontStyle.Normal,
+                alignment = TextAnchor.MiddleCenter,
+                wordWrap = true,
+                normal = { textColor = new Color(0.88f, 0.93f, 0.97f) }
+            };
+
+            GUI.Label(new Rect(cardRect.x + 30f, cardRect.y + 155f, cardRect.width - 60f, 32f),
+                "Deep beneath the ocean lies a crystal spoken of only in legends.", bodyStyle);
+
+            GUI.Label(new Rect(cardRect.x + 30f, cardRect.y + 195f, cardRect.width - 60f, 32f),
+                "Drawn by its mysterious signal, a lone diver descends into the abyss to find it.", bodyStyle);
+
+            // 4. Highlight Line (Foreboding Warning)
+            GUIStyle highlightStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 19,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = new Color(0.0f, 0.88f, 1.0f) }
+            };
+            GUI.Label(new Rect(cardRect.x + 30f, cardRect.y + 252f, cardRect.width - 60f, 34f),
+                "Some secrets were never meant to be found.", highlightStyle);
+
+            // 5. Interactive "COMMENCE DESCENT" Button
+            Rect btnRect = new Rect(cardRect.center.x - 175f, cardRect.y + cardRect.height - 75f, 350f, 44f);
+            GUI.DrawTexture(btnRect, solidPillTex);
+
+            GUIStyle btnStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 14,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = new Color(0.2f, 1.0f, 0.9f) }
+            };
+
+            // Subtle pulsing prompt
+            float pulse = Mathf.PingPong(Time.time * 2.5f, 1f);
+            Color promptColor = Color.Lerp(new Color(0.2f, 1.0f, 0.9f), Color.white, pulse);
+            btnStyle.normal.textColor = promptColor;
+
+            GUI.Label(btnRect, "COMMENCE DESCENT  [CLICK OR SPACE]", btnStyle);
+
+            if (GUI.Button(btnRect, GUIContent.none, GUIStyle.none))
+            {
+                DismissMissionBriefing();
+            }
         }
 
         // ==========================================
