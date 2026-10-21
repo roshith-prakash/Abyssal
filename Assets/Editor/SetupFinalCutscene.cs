@@ -18,8 +18,8 @@ namespace Abyssal.Editor
     [InitializeOnLoad]
     public static class SetupFinalCutscene
     {
-        private const string RoarAudioPath = "Assets/Audio/Leviathan_Roar.wav";
-        private const string AmbienceAudioPath = "Assets/Audio/Underwater_Ambience.wav";
+        private const string RoarAudioPath = "Assets/Audio/Reaper roar.mp3";
+        private const string AmbienceAudioPath = "Assets/Audio/First Immersion.mp3";
         private const string GhostMatPath = "Assets/ghost-leviathan/Materials/Ghost_Leviathan_shell_spec.mat";
         private const string GhostNormalTexPath = "Assets/ghost-leviathan/textures/Ghost_Leviathan_shell_normal.png";
         private const string GhostIllumTexPath = "Assets/ghost-leviathan/textures/Ghost_Leviathan_shell_illum.png";
@@ -30,6 +30,10 @@ namespace Abyssal.Editor
             {
                 EditorPrefs.SetBool("kRunInBackground", true);
                 Application.runInBackground = true;
+                EditorApplication.delayCall += () =>
+                {
+                    try { CleanupRogueAudiosAndEnforceClips(); } catch {}
+                };
             }
             catch {}
 
@@ -223,12 +227,77 @@ namespace Abyssal.Editor
             // 4. Setup Master Cutscene Controller GameObject & Wire References
             SetupCutsceneController();
 
-            // 5. Mark Scene Dirty & Save
+            // 5. Cleanup Rogue Audios and enforce proper clips
+            CleanupRogueAudiosAndEnforceClips();
+
+            // 6. Mark Scene Dirty & Save
             var scene = EditorSceneManager.GetActiveScene();
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene);
 
             Debug.Log("[Abyssal] Final Horror Cutscene successfully configured and saved!");
+        }
+
+        [MenuItem("Abyssal/Cleanup Rogue Audios And Enforce Clips", false, 6)]
+        public static void CleanupRogueAudiosAndEnforceClips()
+        {
+            // 1. Remove rogue LeviathanEncounterController so no audio plays at start
+            GameObject rogueController = GameObject.Find("LeviathanEncounterController");
+            if (rogueController != null)
+            {
+                Undo.DestroyObjectImmediate(rogueController);
+                Debug.Log("[Abyssal] Removed rogue LeviathanEncounterController from scene.");
+            }
+
+            // 2. Clear any audio clips from Reaper / Ghost Leviathan patrol sources so no roar plays on patrol
+            foreach (var audioSource in Object.FindObjectsByType<AudioSource>(FindObjectsInactive.Include))
+            {
+                if (audioSource.gameObject.name.Contains("Reaper") || audioSource.gameObject.name.Contains("Ghost"))
+                {
+                    audioSource.clip = null;
+                    audioSource.playOnAwake = false;
+                    audioSource.Stop();
+                    EditorUtility.SetDirty(audioSource);
+                }
+            }
+
+            // 3. Configure Camera.main with First Immersion.mp3 (plays throughout game)
+            Camera mainCam = Camera.main;
+            if (mainCam != null)
+            {
+                AudioSource camAudio = mainCam.GetComponent<AudioSource>();
+                if (camAudio == null) camAudio = mainCam.gameObject.AddComponent<AudioSource>();
+                AudioClip musicClip = AssetDatabase.LoadAssetAtPath<AudioClip>(AmbienceAudioPath);
+                if (musicClip != null)
+                {
+                    camAudio.clip = musicClip;
+                    camAudio.loop = true;
+                    camAudio.volume = 0.65f;
+                    camAudio.spatialBlend = 0f;
+                    camAudio.playOnAwake = true;
+                    EditorUtility.SetDirty(camAudio);
+                }
+            }
+
+            // 4. Enforce Reaper roar on FinalCutsceneController for the end cutscene
+            FinalCutsceneController cutscene = Object.FindAnyObjectByType<FinalCutsceneController>();
+            if (cutscene != null)
+            {
+                SerializedObject serialized = new SerializedObject(cutscene);
+                AudioClip roarClip = AssetDatabase.LoadAssetAtPath<AudioClip>(RoarAudioPath);
+                if (roarClip != null)
+                {
+                    serialized.FindProperty("roarClip").objectReferenceValue = roarClip;
+                    serialized.ApplyModifiedProperties();
+                    EditorUtility.SetDirty(cutscene);
+                }
+            }
+
+            var activeScene = EditorSceneManager.GetActiveScene();
+            if (activeScene.isLoaded)
+            {
+                EditorSceneManager.MarkSceneDirty(activeScene);
+            }
         }
 
         [MenuItem("Abyssal/Test Final Cutscene Now", false, 7)]

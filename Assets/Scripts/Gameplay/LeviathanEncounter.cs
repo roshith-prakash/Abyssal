@@ -68,6 +68,17 @@ namespace Abyssal.Gameplay
                     roarAudioSource.spatialBlend = 0.5f;
                 }
             }
+
+            if (roarClip == null)
+            {
+                roarClip = Resources.Load<AudioClip>("Audio/Reaper roar");
+#if UNITY_EDITOR
+                if (roarClip == null)
+                {
+                    roarClip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Reaper roar.mp3");
+                }
+#endif
+            }
         }
 
         private void Start()

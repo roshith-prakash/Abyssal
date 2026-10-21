@@ -277,7 +277,7 @@ namespace Abyssal.Editor
                 audio.rolloffMode = AudioRolloffMode.Logarithmic;
                 audio.playOnAwake = false;
 
-                AudioClip roarClip = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Leviathan_Roar.wav");
+                AudioClip roarClip = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Reaper roar.mp3");
                 if (roarClip != null)
                 {
                     audio.clip = roarClip;

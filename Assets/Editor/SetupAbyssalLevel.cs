@@ -697,21 +697,22 @@ namespace Abyssal.Editor
 
             AudioSource encounterAudio = encounterGO.GetComponent<AudioSource>();
             if (encounterAudio == null) encounterAudio = encounterGO.AddComponent<AudioSource>();
-            AudioClip roarClip = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Leviathan_Roar.wav");
+            AudioClip roarClip = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Reaper roar.mp3");
             if (roarClip != null) encounterAudio.clip = roarClip;
 
-            // Ambient underwater hydrostatic hum
+            // Background immersion soundtrack ("First Immersion.mp3")
             Camera mainCam = Camera.main;
             if (mainCam != null)
             {
                 AudioSource ambAudio = mainCam.GetComponent<AudioSource>();
                 if (ambAudio == null) ambAudio = mainCam.gameObject.AddComponent<AudioSource>();
-                AudioClip ambClip = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Underwater_Ambience.wav");
-                if (ambClip != null)
+                AudioClip musicClip = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/First Immersion.mp3");
+                if (musicClip != null)
                 {
-                    ambAudio.clip = ambClip;
+                    ambAudio.clip = musicClip;
                     ambAudio.loop = true;
-                    ambAudio.volume = 0.55f;
+                    ambAudio.volume = 0.65f;
+                    ambAudio.spatialBlend = 0f;
                     ambAudio.playOnAwake = true;
                 }
             }

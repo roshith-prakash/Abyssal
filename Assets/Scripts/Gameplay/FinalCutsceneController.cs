@@ -254,6 +254,7 @@ namespace Abyssal.Gameplay
             isCutsceneActive = true;
 
             ResolveSceneReferences();
+            PrepareProceduralAudio();
 
             // Lock controls, but keep camera firmly attached to Diver for immersive First-Person horror!
             if (diverCamera != null)
@@ -460,6 +461,7 @@ namespace Abyssal.Gameplay
 
             if (ambientAudioSource != null) ambientAudioSource.Stop();
             if (cutsceneAudioSource != null) cutsceneAudioSource.Stop();
+            BackgroundMusicManager.StopMusic();
 
             yield return new WaitForSeconds(endingTextDelay);
             showEndingScreen = true;
@@ -656,15 +658,8 @@ namespace Abyssal.Gameplay
 
         private void PlaySound(AudioClip clip, float volume = 1.0f)
         {
-            if (cutsceneAudioSource == null) return;
-            if (clip != null)
-            {
-                cutsceneAudioSource.PlayOneShot(clip, volume);
-            }
-            else if (roarClip != null)
-            {
-                cutsceneAudioSource.PlayOneShot(roarClip, volume * 0.75f);
-            }
+            if (cutsceneAudioSource == null || clip == null) return;
+            cutsceneAudioSource.PlayOneShot(clip, volume);
         }
 
         private void ResolveSceneReferences()
@@ -759,9 +754,15 @@ namespace Abyssal.Gameplay
 
         private void PrepareProceduralAudio()
         {
-            if (roarClip == null)
+            if (roarClip == null || !roarClip.name.Contains("Reaper"))
             {
-                roarClip = Resources.Load<AudioClip>("Audio/Leviathan_Roar");
+                roarClip = Resources.Load<AudioClip>("Audio/Reaper roar");
+#if UNITY_EDITOR
+                if (roarClip == null)
+                {
+                    roarClip = UnityEditor.AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/Reaper roar.mp3");
+                }
+#endif
             }
 
             if (glitchClip == null) glitchClip = SynthesizeGlitchSound();

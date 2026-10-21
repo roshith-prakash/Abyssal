@@ -99,11 +99,7 @@ namespace Abyssal.Gameplay
 
         private void TriggerAmbientRoar()
         {
-            if (roarSource != null && roarSource.clip != null)
-            {
-                roarSource.pitch = Random.Range(0.85f, 1.05f);
-                roarSource.Play();
-            }
+            // Ambient patrol roars disabled - roars are exclusively reserved for the final cutscene
         }
 
         private void OnDrawGizmosSelected()
