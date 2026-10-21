@@ -58,5 +58,12 @@ namespace Abyssal.Gameplay
                 initialTailRot = tailTransform.localRotation;
             }
         }
+
+        public void Init(float scale)
+        {
+            // Smaller fish wag faster with sharper flutter; larger fish have slower, majestic sweeps
+            tailWagSpeed = Mathf.Lerp(13f, 5f, Mathf.InverseLerp(0.5f, 2.0f, scale));
+            tailWagAngle = Mathf.Lerp(28f, 15f, Mathf.InverseLerp(0.5f, 2.0f, scale));
+        }
     }
 }

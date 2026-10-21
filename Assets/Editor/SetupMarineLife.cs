@@ -292,21 +292,11 @@ namespace Abyssal.Editor
 
         private static void SetupAmbientFishSystem()
         {
-            // 1. Create or get fish material
-            Material fishMat = AssetDatabase.LoadAssetAtPath<Material>(FishMatPath);
-            if (fishMat == null)
-            {
-                Shader standardShader = Shader.Find("Standard");
-                fishMat = new Material(standardShader) { name = "AmbientFish_Mat" };
-                fishMat.color = new Color(0.12f, 0.45f, 0.70f, 1f); // Deep oceanic blue-cyan
-                fishMat.EnableKeyword("_EMISSION");
-                // Luminous photophores on fish lateral line
-                fishMat.SetColor("_EmissionColor", new Color(0.15f, 1.8f, 2.2f, 1f));
-                fishMat.SetFloat("_Glossiness", 0.75f);
-                fishMat.SetFloat("_Metallic", 0.15f);
-
-                AssetDatabase.CreateAsset(fishMat, FishMatPath);
-            }
+            // 1. Create or get fish materials (Cyan, Amber, Violet, Emerald)
+            Material matCyan = GetOrCreateFishMaterial("Assets/diver/Materials/AmbientFish_Cyan.mat", new Color(0.12f, 0.45f, 0.70f, 1f), new Color(0.15f, 1.8f, 2.4f, 1f) * 1.6f, "AmbientFish_Cyan");
+            Material matAmber = GetOrCreateFishMaterial("Assets/diver/Materials/AmbientFish_Amber.mat", new Color(0.70f, 0.38f, 0.10f, 1f), new Color(2.4f, 1.4f, 0.25f, 1f) * 1.6f, "AmbientFish_Amber");
+            Material matViolet = GetOrCreateFishMaterial("Assets/diver/Materials/AmbientFish_Violet.mat", new Color(0.42f, 0.15f, 0.65f, 1f), new Color(1.9f, 0.4f, 2.6f, 1f) * 1.6f, "AmbientFish_Violet");
+            Material matEmerald = GetOrCreateFishMaterial("Assets/diver/Materials/AmbientFish_Emerald.mat", new Color(0.12f, 0.60f, 0.35f, 1f), new Color(0.3f, 2.5f, 1.2f, 1f) * 1.6f, "AmbientFish_Emerald");
 
             // 2. Build or load procedural fish meshes
             Mesh bodyMesh = AssetDatabase.LoadAssetAtPath<Mesh>(FishBodyMeshPath);
@@ -335,7 +325,7 @@ namespace Abyssal.Editor
                 mf.sharedMesh = bodyMesh;
 
                 MeshRenderer mr = rootGO.AddComponent<MeshRenderer>();
-                mr.sharedMaterial = fishMat;
+                mr.sharedMaterial = matCyan;
 
                 FishBoid boid = rootGO.AddComponent<FishBoid>();
 
@@ -348,7 +338,7 @@ namespace Abyssal.Editor
                 tmf.sharedMesh = tailMesh;
 
                 MeshRenderer tmr = tailGO.AddComponent<MeshRenderer>();
-                tmr.sharedMaterial = fishMat;
+                tmr.sharedMaterial = matCyan;
 
                 boid.SetTailTransform(tailGO.transform);
 
@@ -363,16 +353,37 @@ namespace Abyssal.Editor
             schoolsParent = new GameObject("Ambient_Fauna");
             Undo.RegisterCreatedObjectUndo(schoolsParent, "Create Ambient Fauna");
 
-            // 5 distinct school locations inhabiting key zones
-            var schoolConfigs = new (string name, Vector3 pos, int count, float radius, float minY, float maxY)[]
+            // 16 distinct school locations inhabiting every elevation, canopy, and depth zone
+            var schoolConfigs = new (string name, Vector3 pos, int count, float radius, float minY, float maxY, Material mat, float minScale, float maxScale, float speed)[]
             {
-                ("School_UpperKelpForest",  new Vector3(0f, 2.5f, 28f),    14, 11f, -1f,  5f),
-                ("School_CanyonWestGrove",  new Vector3(-13f, -5f, 58f),   12, 10f, -8f, -2f),
-                ("School_CanyonEastGrove",  new Vector3(14f, -7f, 72f),    14, 11f, -11f, -3f),
-                ("School_DeepBasinCenter",  new Vector3(0f, -15f, 98f),    16, 12f, -19f, -11f),
-                ("School_EggNestPerimeter", new Vector3(-8f, -21f, 124f),  12,  9f, -23f, -17f)
+                // Starting shallows & upper shelf (immediate lively impression upon spawning)
+                ("School_SpawnArrival_Cyan",         new Vector3(0f, 7f, 12f),       28, 12f,  3f,   9f, matCyan,    0.65f, 1.1f,  3.5f),
+                ("School_UpperShelf_West_Amber",     new Vector3(-12f, 6f, 22f),     24, 10f,  2f,   8f, matAmber,   0.50f, 0.85f, 4.2f),
+                ("School_UpperShelf_East_Emerald",   new Vector3(12f, 6f, 22f),      24, 10f,  2f,   8f, matEmerald, 0.70f, 1.1f,  3.2f),
+
+                // Kelp forest canopy (swirling in and out of the towering creepvine fronds)
+                ("School_UpperKelpCanopy_Cyan",      new Vector3(0f, 3f, 32f),       32, 13f, -1f,   6f, matCyan,    0.80f, 1.3f,  3.4f),
+                ("School_KelpForest_West_Emerald",   new Vector3(-14f, 1f, 42f),     26, 11f, -3f,   4f, matEmerald, 0.75f, 1.2f,  3.0f),
+                ("School_KelpForest_East_Amber",     new Vector3(15f, 1f, 44f),      26, 11f, -3f,   4f, matAmber,   0.70f, 1.15f, 3.6f),
+
+                // Canyon drop-off & mid-canyon groves
+                ("School_CanyonEntrance_Cyan",       new Vector3(1f, -3f, 54f),      28, 12f, -7f,   0f, matCyan,    0.85f, 1.4f,  3.2f),
+                ("School_CanyonWestGrove_Violet",    new Vector3(-15f, -6f, 65f),    25, 10f, -10f, -3f, matViolet,  0.90f, 1.5f,  2.8f),
+                ("School_CanyonEastGrove_Amber",     new Vector3(15f, -7f, 75f),     25, 11f, -11f, -4f, matAmber,   0.80f, 1.3f,  3.3f),
+                ("School_MidCanyon_DeepPass_Cyan",   new Vector3(0f, -10f, 85f),     30, 13f, -14f, -6f, matCyan,    0.70f, 1.2f,  3.8f),
+
+                // Deep canyon basin & amphitheater
+                ("School_DeepBasinCenter_Violet",    new Vector3(0f, -15f, 102f),    36, 15f, -19f, -11f, matViolet, 1.00f, 1.7f,  2.9f),
+                ("School_DeepBasin_North_Emerald",   new Vector3(12f, -16f, 114f),   22, 10f, -20f, -13f, matEmerald, 0.70f, 1.1f, 3.4f),
+                ("School_DeepBasin_South_Amber",     new Vector3(-13f, -17f, 118f),  22, 10f, -21f, -14f, matAmber,  0.65f, 1.0f,  4.0f),
+
+                // Egg nest perimeter & crystal approach
+                ("School_EggNestPerimeter_West_Violet", new Vector3(-10f, -21f, 132f), 20,  9f, -24f, -18f, matViolet, 0.90f, 1.5f, 2.6f),
+                ("School_EggNestPerimeter_East_Cyan",   new Vector3(10f, -21f, 136f),  20,  9f, -24f, -18f, matCyan,   0.85f, 1.35f, 3.0f),
+                ("School_CrystalCavern_Emerald",        new Vector3(0f, -21f, 150f),   25, 10f, -24f, -18f, matEmerald, 0.75f, 1.25f, 2.8f)
             };
 
+            int totalFish = 0;
             foreach (var cfg in schoolConfigs)
             {
                 GameObject schoolGO = new GameObject(cfg.name);
@@ -380,10 +391,29 @@ namespace Abyssal.Editor
                 schoolGO.transform.position = cfg.pos;
 
                 FishSchool schoolComp = schoolGO.AddComponent<FishSchool>();
-                schoolComp.Initialize(fishPrefab, cfg.count, cfg.radius);
+                schoolComp.Initialize(fishPrefab, cfg.count, cfg.radius, cfg.minY, cfg.maxY, cfg.mat, cfg.minScale, cfg.maxScale, cfg.speed);
+                totalFish += cfg.count;
             }
 
-            Debug.Log("[Abyssal] Created 5 dynamic ambient fish schools across the kelp forests and deep trench!");
+            Debug.Log($"[Abyssal] Created {schoolConfigs.Length} dynamic ambient fish schools with {totalFish} total fish across all canyon depths!");
+        }
+
+        private static Material GetOrCreateFishMaterial(string path, Color baseColor, Color emissionColor, string name)
+        {
+            Material mat = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (mat == null)
+            {
+                Shader standardShader = Shader.Find("Standard");
+                mat = new Material(standardShader) { name = name };
+                mat.color = baseColor;
+                mat.EnableKeyword("_EMISSION");
+                mat.SetColor("_EmissionColor", emissionColor);
+                mat.SetFloat("_Glossiness", 0.75f);
+                mat.SetFloat("_Metallic", 0.15f);
+
+                AssetDatabase.CreateAsset(mat, path);
+            }
+            return mat;
         }
 
         // Procedural fish mesh generator

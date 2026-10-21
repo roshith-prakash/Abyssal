@@ -15,6 +15,11 @@ namespace Abyssal.Gameplay
         [SerializeField] private float minHeight = -22f;
         [SerializeField] private float maxHeight = 6f;
 
+        [Header("Appearance & Variety")]
+        [SerializeField] private Material schoolMaterial;
+        [SerializeField] private float minFishScale = 0.7f;
+        [SerializeField] private float maxFishScale = 1.3f;
+
         [Header("Boid Dynamics")]
         [SerializeField] private float normalSpeed = 3.2f;
         [SerializeField] private float panicSpeed = 7.0f;
@@ -52,11 +57,17 @@ namespace Abyssal.Gameplay
             nextWaypointChangeTime = Time.time + Random.Range(5f, 10f);
         }
 
-        public void Initialize(GameObject prefab, int count, float radius)
+        public void Initialize(GameObject prefab, int count, float radius, float minY = -22f, float maxY = 6f, Material material = null, float minScale = 0.7f, float maxScale = 1.3f, float speed = 3.2f)
         {
             fishPrefab = prefab;
             fishCount = count;
             swimAreaRadius = radius;
+            minHeight = minY;
+            maxHeight = maxY;
+            schoolMaterial = material;
+            minFishScale = minScale;
+            maxFishScale = maxScale;
+            normalSpeed = speed;
         }
 
         private void SpawnSchool()
@@ -71,9 +82,21 @@ namespace Abyssal.Gameplay
                 GameObject fishGO = Instantiate(fishPrefab, spawnPos, Random.rotation, transform);
                 fishGO.name = $"{gameObject.name}_Fish_{i + 1}";
 
+                float scale = Random.Range(minFishScale, maxFishScale);
+                fishGO.transform.localScale = Vector3.one * scale;
+
+                if (schoolMaterial != null)
+                {
+                    foreach (var rend in fishGO.GetComponentsInChildren<Renderer>())
+                    {
+                        rend.sharedMaterial = schoolMaterial;
+                    }
+                }
+
                 FishBoid boid = fishGO.GetComponent<FishBoid>();
                 if (boid == null) boid = fishGO.AddComponent<FishBoid>();
 
+                boid.Init(scale);
                 boid.Velocity = Random.insideUnitSphere.normalized * normalSpeed;
                 fishList.Add(boid);
             }
