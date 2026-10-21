@@ -23,6 +23,15 @@ namespace Abyssal.Editor
         private const string FishBodyMeshPath = "Assets/Prefabs/FishBodyMesh.asset";
         private const string FishTailMeshPath = "Assets/Prefabs/FishTailMesh.asset";
 
+        private const string SeaweedMatPath = "Assets/Seaweed/Materials/Seaweed_Mat.mat";
+        private static readonly string[] SeaweedModelPaths = new string[]
+        {
+            "Assets/Seaweed/Seaweed_Cluster.obj",
+            "Assets/Seaweed/Seaweed_Tall.obj",
+            "Assets/Seaweed/Seaweed_Mid.obj",
+            "Assets/Seaweed/Seaweed_Short.obj"
+        };
+
         [MenuItem("Abyssal/Populate Marine Life & Kelp Forests", false, 5)]
         public static void ExecuteSetup()
         {
@@ -32,6 +41,7 @@ namespace Abyssal.Editor
 
             SetupCreepvineMaterial();
             SetupCreepvineForest();
+            SetupBenthicSeaweed();
             SetupReaperFauna();
             SetupAmbientFishSystem();
 
@@ -161,6 +171,131 @@ namespace Abyssal.Editor
             }
 
             Debug.Log($"[Abyssal] Planted {stalkCoordinates.Length} creepvine stalks in 3 dense forest groves with current sway and glowing seed clusters.");
+        }
+
+        // --- 1B. BENTHIC SEAWEED CARPET & THICKETS ---
+
+        private static void SetupBenthicSeaweed()
+        {
+            // 1. Load or create Seaweed Material
+            Material mat = AssetDatabase.LoadAssetAtPath<Material>(SeaweedMatPath);
+            if (mat == null)
+            {
+                Shader shader = Shader.Find("Standard");
+                mat = new Material(shader) { name = "Seaweed_Mat" };
+                mat.color = new Color(0.04f, 0.28f, 0.10f, 1f);
+                mat.EnableKeyword("_EMISSION");
+                mat.SetColor("_EmissionColor", new Color(0.05f, 0.35f, 0.14f, 1f));
+                mat.SetFloat("_Glossiness", 0.6f);
+                mat.SetFloat("_Metallic", 0.1f);
+                AssetDatabase.CreateAsset(mat, SeaweedMatPath);
+            }
+
+            // 2. Load the seaweed model variants
+            List<GameObject> variants = new List<GameObject>();
+            foreach (var path in SeaweedModelPaths)
+            {
+                GameObject pref = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+                if (pref != null) variants.Add(pref);
+            }
+
+            if (variants.Count == 0)
+            {
+                Debug.LogError("[Abyssal] Could not find any Seaweed OBJ models at " + SeaweedModelPaths[0]);
+                return;
+            }
+
+            // 3. Setup parent
+            GameObject oldSeaweed = GameObject.Find("Seaweed_Foliage");
+            if (oldSeaweed != null) Undo.DestroyObjectImmediate(oldSeaweed);
+
+            GameObject seaweedParent = new GameObject("Seaweed_Foliage");
+            Undo.RegisterCreatedObjectUndo(seaweedParent, "Create Benthic Seaweed Foliage");
+
+            // 4. Coordinates for 64 benthic seaweed clusters spanning the entire seabed
+            Vector2[] clusterCoords = new Vector2[]
+            {
+                // Zone 1: Entry / Shallows / Shelf (Z: 6 to 36)
+                new Vector2(-10f, 8f),   new Vector2(-14f, 12f),  new Vector2(-6f, 15f),
+                new Vector2(-16f, 20f),  new Vector2(-8f, 24f),   new Vector2(-13f, 28f),
+                new Vector2(9f, 9f),     new Vector2(14f, 13f),   new Vector2(7f, 17f),
+                new Vector2(15f, 22f),   new Vector2(8f, 26f),    new Vector2(14f, 31f),
+                new Vector2(-3f, 21f),   new Vector2(3f, 25f),    new Vector2(-17f, 35f),
+                new Vector2(17f, 36f),
+
+                // Zone 2: Kelp Floor & Drop-Off Slopes (Z: 38 to 78)
+                new Vector2(-11f, 40f),  new Vector2(-18f, 44f),  new Vector2(-7f, 47f),
+                new Vector2(-15f, 52f),  new Vector2(-9f, 57f),   new Vector2(-19f, 62f),
+                new Vector2(-12f, 68f),  new Vector2(-17f, 74f),  new Vector2(-8f, 77f),
+                new Vector2(12f, 41f),   new Vector2(17f, 46f),   new Vector2(8f, 49f),
+                new Vector2(16f, 54f),   new Vector2(10f, 59f),   new Vector2(20f, 64f),
+                new Vector2(13f, 70f),   new Vector2(18f, 76f),   new Vector2(9f, 78f),
+                new Vector2(-4f, 45f),   new Vector2(4f, 60f),
+
+                // Zone 3: Mid Canyon & Canyon Trench (Z: 80 to 112)
+                new Vector2(-15f, 82f),  new Vector2(-21f, 86f),  new Vector2(-13f, 91f),
+                new Vector2(-19f, 96f),  new Vector2(-12f, 102f), new Vector2(-18f, 107f),
+                new Vector2(14f, 83f),   new Vector2(20f, 88f),   new Vector2(12f, 93f),
+                new Vector2(21f, 98f),   new Vector2(14f, 104f),  new Vector2(19f, 109f),
+                new Vector2(-6f, 89f),   new Vector2(6f, 95f),    new Vector2(-8f, 105f),
+                new Vector2(7f, 108f),
+
+                // Zone 4: Deep Basin & Crystal Nest Glade (Z: 114 to 154)
+                new Vector2(-14f, 114f), new Vector2(-22f, 118f), new Vector2(-16f, 123f),
+                new Vector2(-24f, 128f), new Vector2(-11f, 134f), new Vector2(-18f, 140f),
+                new Vector2(-9f, 145f),  new Vector2(-15f, 150f),
+                new Vector2(15f, 115f),  new Vector2(23f, 120f),  new Vector2(17f, 125f),
+                new Vector2(25f, 130f),  new Vector2(12f, 136f),  new Vector2(19f, 142f),
+                new Vector2(10f, 147f),  new Vector2(16f, 152f),
+                new Vector2(-5f, 138f),  new Vector2(5f, 141f)
+            };
+
+            for (int i = 0; i < clusterCoords.Length; i++)
+            {
+                float worldX = clusterCoords[i].x;
+                float worldZ = clusterCoords[i].y;
+                float floorY = SetupAbyssalLevel.CalculateOrganicElevation(worldX, worldZ);
+
+                GameObject variantPrefab = variants[i % variants.Count];
+                GameObject sGO = (GameObject)PrefabUtility.InstantiatePrefab(variantPrefab);
+                sGO.name = $"Seaweed_Patch_{i + 1:D2}";
+                PrefabUtility.UnpackPrefabInstance(sGO, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+
+                sGO.transform.SetParent(seaweedParent.transform, true);
+                sGO.transform.position = new Vector3(worldX, floorY - 0.1f, worldZ);
+
+                // Natural organic rotation & tilt
+                float yaw = (i * 53.7f + UnityEngine.Random.Range(-20f, 20f)) % 360f;
+                float tiltX = UnityEngine.Random.Range(-3.5f, 3.5f);
+                float tiltZ = UnityEngine.Random.Range(-3.5f, 3.5f);
+                sGO.transform.rotation = Quaternion.Euler(tiltX, yaw, tiltZ);
+
+                // Scale: 1.2m to 2.4m natural seabed undergrowth
+                float uniformScale = UnityEngine.Random.Range(1.2f, 2.2f);
+                float heightMultiplier = UnityEngine.Random.Range(0.85f, 1.35f);
+                sGO.transform.localScale = new Vector3(uniformScale, uniformScale * heightMultiplier, uniformScale);
+
+                // Assign rich oceanic seaweed material
+                if (mat != null)
+                {
+                    foreach (var r in sGO.GetComponentsInChildren<Renderer>())
+                    {
+                        r.sharedMaterial = mat;
+                    }
+                }
+
+                // Add dynamic underwater current sway
+                UnderwaterFoliageSway sway = sGO.GetComponent<UnderwaterFoliageSway>();
+                if (sway == null) sway = sGO.AddComponent<UnderwaterFoliageSway>();
+
+                float swayAng = UnityEngine.Random.Range(2.8f, 4.5f);
+                float swaySpd = UnityEngine.Random.Range(0.65f, 0.95f);
+                float flutSpd = UnityEngine.Random.Range(1.2f, 1.6f);
+                float flutAng = UnityEngine.Random.Range(0.8f, 1.5f);
+                sway.ConfigureSway(swayAng, swaySpd, flutSpd, flutAng);
+            }
+
+            Debug.Log($"[Abyssal] Successfully created {clusterCoords.Length} benthic seaweed foliage patches across the seafloor!");
         }
 
         // --- 2. REAPER PREDATOR MARINE FAUNA ---

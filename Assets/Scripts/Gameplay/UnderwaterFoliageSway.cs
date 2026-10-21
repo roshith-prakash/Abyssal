@@ -55,5 +55,13 @@ namespace Abyssal.Gameplay
 
             transform.localRotation = baseRotation * swayRot;
         }
+
+        public void ConfigureSway(float angle, float speed, float fSpeed = 1.4f, float fAngle = 1.2f)
+        {
+            swayAngle = angle;
+            swaySpeed = speed;
+            flutterSpeed = fSpeed;
+            flutterAngle = fAngle;
+        }
     }
 }
